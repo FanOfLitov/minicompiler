@@ -1,8 +1,8 @@
 from enum import Enum, auto
-from typing import Any, Union
+from typing import Any
 
 class TokenType(Enum):
-    # Ключевые слова (должны соответствовать списку из LANG-2)
+    # Ключевые слова
     KW_IF = auto()
     KW_ELSE = auto()
     KW_WHILE = auto()
@@ -22,46 +22,44 @@ class TokenType(Enum):
     INT_LITERAL = auto()
     FLOAT_LITERAL = auto()
     STRING_LITERAL = auto()
-    BOOL_LITERAL = auto()  # true/false уже keywords, но можно и так
 
-    # Операторы (односимвольные)
-    PLUS = auto()      # +
-    MINUS = auto()     # -
-    STAR = auto()      # *
-    SLASH = auto()     # /
-    PERCENT = auto()   # %
-    ASSIGN = auto()    # =
-    LT = auto()        # <
-    GT = auto()        # >
-    NOT = auto()       # !
-    AMPERSAND = auto() # &
-    PIPE = auto()      # |
-    LPAREN = auto()    # (
-    RPAREN = auto()    # )
-    LBRACE = auto()    # {
-    RBRACE = auto()    # }
-    LBRACKET = auto()  # [
-    RBRACKET = auto()  # ]
-    SEMICOLON = auto() # ;
-    COLON = auto()     # :
-    COMMA = auto()     # ,
-    DOT = auto()       # .
+    # Операторы
+    PLUS = auto()
+    MINUS = auto()
+    STAR = auto()
+    SLASH = auto()
+    PERCENT = auto()
+    ASSIGN = auto()
+    EQ = auto()
+    NE = auto()
+    LT = auto()
+    LE = auto()
+    GT = auto()
+    GE = auto()
+    NOT = auto()
+    AND = auto()
+    OR = auto()
 
-    # Многосимвольные операторы
-    EQ = auto()        # ==
-    NE = auto()        # !=
-    LE = auto()        # <=
-    GE = auto()        # >=
-    AND = auto()       # &&
-    OR = auto()        # ||
-    PLUS_ASSIGN = auto()   # +=
-    MINUS_ASSIGN = auto()  # -=
-    STAR_ASSIGN = auto()   # *=
-    SLASH_ASSIGN = auto()  # /=
+    PLUS_ASSIGN = auto()
+    MINUS_ASSIGN = auto()
+    STAR_ASSIGN = auto()
+    SLASH_ASSIGN = auto()
 
-    # Специальные
+    # Делимитеры
+    LPAREN = auto()
+    RPAREN = auto()
+    LBRACE = auto()
+    RBRACE = auto()
+    LBRACKET = auto()
+    RBRACKET = auto()
+    SEMICOLON = auto()
+    COMMA = auto()
+    COLON = auto()
+    DOT = auto()
+
     END_OF_FILE = auto()
     ERROR = auto()
+
 
 class Token:
     def __init__(self, type: TokenType, lexeme: str, line: int, column: int, literal: Any = None):
@@ -69,9 +67,11 @@ class Token:
         self.lexeme = lexeme
         self.line = line
         self.column = column
-        self.literal = literal  # для чисел и строк – преобразованное значение
+        self.literal = literal
 
-    def __repr__(self):
-        # Формат: LINE:COLUMN TOKEN_TYPE "LEXEME" [LITERAL_VALUE]
+    def __str__(self):
         literal_str = f" {self.literal}" if self.literal is not None else ""
         return f"{self.line}:{self.column} {self.type.name} \"{self.lexeme}\"{literal_str}"
+
+    def __repr__(self):
+        return self.__str__()
