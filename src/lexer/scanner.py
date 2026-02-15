@@ -4,13 +4,13 @@ from .token import Token, TokenType
 class Scanner:
     def __init__(self, source: str):
         self.source = source
-        self.tokens = []          # список всех токенов (для простоты можно и не хранить)
+        self.tokens = []          # список всех токенов
         self.start = 0             # начало текущего лексемы
         self.current = 0           # текущая позиция в строке
         self.line = 1
         self.column = 1
 
-        # Словарь ключевых слов
+
         self.keywords = {
             'if': TokenType.KW_IF,
             'else': TokenType.KW_ELSE,
@@ -27,31 +27,26 @@ class Scanner:
             'fn': TokenType.KW_FN,
         }
 
-    # --- Вспомогательные методы ---
     def is_at_end(self) -> bool:
         return self.current >= len(self.source)
 
     def advance(self) -> str:
-        """Считывает текущий символ и двигает указатель вперёд."""
         char = self.source[self.current]
         self.current += 1
         self.column += 1
         return char
 
     def peek(self) -> str:
-        """Возвращает текущий символ без перемещения указателя."""
         if self.is_at_end():
             return '\0'
         return self.source[self.current]
 
     def peek_next(self) -> str:
-        """Возвращает следующий символ (lookahead на 1)."""
         if self.current + 1 >= len(self.source):
             return '\0'
         return self.source[self.current + 1]
 
     def match(self, expected: str) -> bool:
-        """Если следующий символ совпадает с ожидаемым, съедаем его."""
         if self.is_at_end():
             return False
         if self.source[self.current] != expected:
@@ -60,39 +55,30 @@ class Scanner:
         self.column += 1
         return True
 
-    # --- Создание токена ---
     def add_token(self, token_type: TokenType, literal: any = None):
-        """Добавляет токен от start до current."""
         lexeme = self.source[self.start:self.current]
         self.tokens.append(Token(token_type, lexeme, self.line, self.start_column, literal))
 
-    # --- Основной метод сканирования ---
     def scan_tokens(self):
-        """Проходит по всему исходнику и возвращает список токенов."""
         while not self.is_at_end():
             self.start = self.current
             self.start_column = self.column   # запоминаем колонку начала токена
             self.scan_token()
-        # Добавляем EOF
         self.tokens.append(Token(TokenType.END_OF_FILE, "", self.line, self.column))
         return self.tokens
 
     def scan_token(self):
         char = self.advance()
         if char == ' ' or char == '\t' or char == '\r':
-            # Игнорируем пробелы (но не новую строку)
             pass
         elif char == '\n':
             self.line += 1
             self.column = 1
         elif char == '/':
             if self.match('/'):
-                # Однострочный комментарий: всё до конца строки
                 while self.peek() != '\n' and not self.is_at_end():
                     self.advance()
-                # Не добавляем токен
             elif self.match('*'):
-                # Многострочный комментарий
                 self.block_comment()
             elif self.match('='):
                 self.add_token(TokenType.SLASH_ASSIGN)
@@ -139,7 +125,6 @@ class Scanner:
             if self.match('&'):
                 self.add_token(TokenType.AND)
             else:
-                # Одиночный & не предусмотрен – ошибка
                 self.error("Unexpected character '&'")
         elif char == '|':
             if self.match('|'):
@@ -180,7 +165,6 @@ class Scanner:
         """Обрабатывает многострочный комментарий /* ... */ (без вложенности)."""
         while not self.is_at_end():
             if self.peek() == '*' and self.peek_next() == '/':
-                # Закрытие комментария
                 self.advance()  # съедаем *
                 self.advance()  # съедаем /
                 return
@@ -190,11 +174,9 @@ class Scanner:
                 self.advance()
             else:
                 self.advance()
-        # Если дошли до конца файла без закрытия комментария
         self.error("Unterminated block comment")
 
     def string(self):
-        """Обрабатывает строковый литерал."""
         while self.peek() != '"' and not self.is_at_end():
             if self.peek() == '\n':
                 self.line += 1
@@ -203,13 +185,11 @@ class Scanner:
         if self.is_at_end():
             self.error("Unterminated string")
             return
-        # Закрывающая кавычка
         self.advance()
         literal = self.source[self.start+1:self.current-1]
         self.add_token(TokenType.STRING_LITERAL, literal)
 
     def number(self):
-        """Обрабатывает числа: целые и с плавающей точкой."""
         while self.is_digit(self.peek()):
             self.advance()
         # Смотрим, есть ли дробная часть
@@ -225,14 +205,12 @@ class Scanner:
             self.add_token(TokenType.INT_LITERAL, literal)
 
     def identifier(self):
-        """Обрабатывает идентификаторы и ключевые слова."""
         while self.is_alpha_numeric(self.peek()):
             self.advance()
         text = self.source[self.start:self.current]
         token_type = self.keywords.get(text, TokenType.IDENTIFIER)
         self.add_token(token_type)
 
-    # --- Вспомогательные проверки символов ---
     def is_digit(self, c: str) -> bool:
         return c.isdigit()
 
@@ -242,8 +220,6 @@ class Scanner:
     def is_alpha_numeric(self, c: str) -> bool:
         return self.is_alpha(c) or self.is_digit(c)
 
-    # --- Обработка ошибок ---
     def error(self, message: str):
-        """Добавляет токен ошибки и выводит сообщение."""
         print(f"Error at line {self.line}, column {self.column}: {message}")
         self.add_token(TokenType.ERROR, message)

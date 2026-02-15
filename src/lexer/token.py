@@ -2,7 +2,7 @@ from enum import Enum, auto
 from typing import Any, Union
 
 class TokenType(Enum):
-    # Ключевые слова (должны соответствовать списку из LANG-2)
+    # Ключевые слова
     KW_IF = auto()
     KW_ELSE = auto()
     KW_WHILE = auto()
@@ -22,9 +22,9 @@ class TokenType(Enum):
     INT_LITERAL = auto()
     FLOAT_LITERAL = auto()
     STRING_LITERAL = auto()
-    BOOL_LITERAL = auto()  # true/false уже keywords, но можно и так
+    BOOL_LITERAL = auto()
 
-    # Операторы (односимвольные)
+
     PLUS = auto()      # +
     MINUS = auto()     # -
     STAR = auto()      # *
@@ -47,7 +47,7 @@ class TokenType(Enum):
     COMMA = auto()     # ,
     DOT = auto()       # .
 
-    # Многосимвольные операторы
+
     EQ = auto()        # ==
     NE = auto()        # !=
     LE = auto()        # <=
