@@ -1,0 +1,7 @@
+fn main() {
+    int a = 10;
+    float b = 20.5;
+    if (a < b && b != 0.0) {
+        return a + b;
+    }
+}

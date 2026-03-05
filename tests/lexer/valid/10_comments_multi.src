@@ -1,0 +1,6 @@
+/* Block comment */
+int /* inside */ y;
+/*
+  Multi
+  line
+*/
