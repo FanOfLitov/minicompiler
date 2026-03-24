@@ -1,0 +1,4 @@
+2:1 KW_INT "int"
+2:18 IDENTIFIER "y"
+2:19 SEMICOLON ";"
+6:4 END_OF_FILE ""

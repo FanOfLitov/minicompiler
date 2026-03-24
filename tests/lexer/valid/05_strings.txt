@@ -1,0 +1,8 @@
+1:1 STRING_LITERAL ""hello world"" hello world
+2:1 STRING_LITERAL ""test"" test
+3:1 STRING_LITERAL """" 
+4:1 STRING_LITERAL ""with number 123"" with number 123
+5:1 STRING_LITERAL ""escaped \"" escaped \
+5:13 IDENTIFIER "quote"
+5:18 ERROR """ Unterminated string
+5:19 END_OF_FILE ""
