@@ -5,43 +5,34 @@ from pathlib import Path
 
 
 def run_lexer_test(test_file: Path, expected_file: Path = None, verbose: bool = False):
-    """Запускает лексер на тестовом файле и сравнивает результат с ожидаемым."""
-
-    # Читаем исходный код
     with open(test_file, 'r', encoding='utf-8') as f:
         source = f.read()
 
-    # Импортируем и запускаем сканер
     from src.lexer.scanner import Scanner
     scanner = Scanner(source)
     tokens = scanner.scan_tokens()
-
-    # Формируем вывод
     output = '\n'.join(str(token) for token in tokens)
 
-    if expected_file and expected_file.exists():
-        # Сравниваем с ожидаемым результатом
-        with open(expected_file, 'r', encoding='utf-8') as f:
-            expected = f.read().strip()
+    if expected_file is None:
+        print(f"✗ {test_file.name} (no expected file specified)")
+        return False
 
-        actual = output.strip()
+    if not expected_file.exists():
+        print(f"✗ {test_file.name} (expected file {expected_file} not found)")
+        return False
 
-        if actual == expected:
-            print(f"✓ {test_file.name}")
-            return True
-        else:
-            print(f"✗ {test_file.name}")
-            if verbose:
-                print(f"Expected:\n{expected}")
-                print(f"Actual:\n{actual}")
-                print("-" * 50)
-            return False
-    else:
-        # Просто выводим результат
-        print(f"Test: {test_file.name}")
-        print(output)
-        print("-" * 50)
+    expected = expected_file.read_text(encoding='utf-8').strip()
+    actual = output.strip()
+
+    if actual == expected:
+        print(f"✓ {test_file.name}")
         return True
+    else:
+        print(f"✗ {test_file.name}")
+        if verbose:
+            print(f"Expected:\n{expected}")
+            print(f"Actual:\n{actual}")
+        return False
 
 
 def run_all_tests():
@@ -108,29 +99,29 @@ def run_all_tests():
     return failed == 0
 
 
-def generate_expected_output():
-    """Генерирует ожидаемые выходные файлы для валидных тестов."""
-
-    valid_dir = Path("tests/lexer/valid")
-
-    print("Generating expected output files...")
-
-    for test_file in sorted(valid_dir.glob("*.src")):
-        expected_file = test_file.with_suffix('.txt')
-
-        with open(test_file, 'r', encoding='utf-8') as f:
-            source = f.read()
-
-        from src.lexer.scanner import Scanner
-        scanner = Scanner(source)
-        tokens = scanner.scan_tokens()
-
-        output = '\n'.join(str(token) for token in tokens)
-
-        with open(expected_file, 'w', encoding='utf-8') as f:
-            f.write(output + '\n')
-
-        print(f"Generated: {expected_file.name}")
+# def generate_expected_output():
+#     """Генерирует ожидаемые выходные файлы для валидных тестов."""
+#
+#     valid_dir = Path("tests/lexer/valid")
+#
+#     print("Generating expected output files...")
+#
+#     for test_file in sorted(valid_dir.glob("*.src")):
+#         expected_file = test_file.with_suffix('.txt')
+#
+#         with open(test_file, 'r', encoding='utf-8') as f:
+#             source = f.read()
+#
+#         from src.lexer.scanner import Scanner
+#         scanner = Scanner(source)
+#         tokens = scanner.scan_tokens()
+#
+#         output = '\n'.join(str(token) for token in tokens)
+#
+#         with open(expected_file, 'w', encoding='utf-8') as f:
+#             f.write(output + '\n')
+#
+#         print(f"Generated: {expected_file.name}")
 
 
 def main():
