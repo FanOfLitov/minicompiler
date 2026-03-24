@@ -16,16 +16,31 @@ A simple compiler for a C-like language, implementing lexical analysis (tokeniza
 minicompiler/
 ├── src/ # Source code
 │ ├── cli.py # Command-line interface
-│ └── lexer/ # Lexical analysis module
-│ ├── scanner.py # Scanner implementation
-│ ├── token.py # Token definitions
-│ └── init.py
+│ ├── lexer/ # Lexical analysis module (Sprint 1)
+│ │ ├── scanner.py
+│ │ ├── token.py
+│ │ └── init.py
+│ ├── parser/ # Syntax analysis module (Sprint 2)
+│ │ ├── parser.py
+│ │ ├── ast.py
+│ │ ├── ast_printer.py
+│ │ └── grammar.txt
+│ └── utils/ # (future)
 ├── tests/ # Test suite
-│ └── lexer/
-│ ├── valid/ # Valid test cases
-│ └── invalid/ # Invalid test cases
+│ ├── lexer/ # Lexer tests
+│ │ ├── valid/
+│ │ └── invalid/
+│ └── parser/ # Parser tests (Sprint 2)
+│ ├── valid/
+│ │ ├── expressions/
+│ │ ├── statements/
+│ │ └── full_programs/
+│ └── invalid/
+│ └── syntax_errors/
 ├── examples/ # Example source files
-├── test_runner.py # Test runner
+├── test_runner.py # Test runner for lexer
+├── test_parser.py # Test runner for parser (Sprint 2)
+├── run.py # Unified command runner
 ├── Makefile # Build automation
 └── README.md
 
