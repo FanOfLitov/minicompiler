@@ -15,7 +15,7 @@ A simple compiler for a C-like language, implementing lexical analysis (tokeniza
 
 minicompiler/
 
-|── src/ # Source code
+├── src/ # Source code
 
 │ ├── cli.py # Command-line interface
 
@@ -68,8 +68,6 @@ minicompiler/
 ├── test_parser.py # Test runner for parser (Sprint 2)
 
 ├── run.py # Unified command runner
-
-├── Makefile # Build automation
 
 └── README.md
 
