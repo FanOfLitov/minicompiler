@@ -14,19 +14,63 @@ A simple compiler for a C-like language, implementing lexical analysis (tokeniza
 ## Project Structure
 
 minicompiler/
-├── src/ # Source code
+
+|── src/ # Source code
+
 │ ├── cli.py # Command-line interface
-│ └── lexer/ # Lexical analysis module
-│ ├── scanner.py # Scanner implementation
-│ ├── token.py # Token definitions
-│ └── init.py
+
+│ ├── lexer/ # Lexical analysis module (Sprint 1)
+
+│ │ ├── scanner.py
+
+│ │ ├── token.py
+
+│ │ └── init.py
+
+│ ├── parser/ # Syntax analysis module (Sprint 2)
+
+│ │ ├── parser.py
+
+│ │ ├── ast.py
+
+│ │ ├── ast_printer.py
+
+│ │ └── grammar.txt
+
+│ └── utils/ # (future)
+
 ├── tests/ # Test suite
-│ └── lexer/
-│ ├── valid/ # Valid test cases
-│ └── invalid/ # Invalid test cases
+
+│ ├── lexer/ # Lexer tests
+
+│ │ ├── valid/
+
+│ │ └── invalid/
+
+│ └── parser/ # Parser tests (Sprint 2)
+
+│ ├── valid/
+
+│ │ ├── expressions/
+
+│ │ ├── statements/
+
+│ │ └── full_programs/
+
+│ └── invalid/
+
+│ └── syntax_errors/
+
 ├── examples/ # Example source files
-├── test_runner.py # Test runner
+
+├── test_runner.py # Test runner for lexer
+
+├── test_parser.py # Test runner for parser (Sprint 2)
+
+├── run.py # Unified command runner
+
 ├── Makefile # Build automation
+
 └── README.md
 
 
@@ -57,33 +101,25 @@ python -m src.cli lex --input examples/hello.src
 # Or using the test runner
 python test_runner.py
 
-Using Makefile
+Unified Runner (run.py)
 
-# Run all tests
-make test
+python run.py lex --input FILE [--output FILE] – tokenize
 
-# Run with verbose output
-make test-verbose
+python run.py parse --input FILE [--output FILE] [--format text|dot] – parse and output AST
 
-# Generate expected output files
-make test-generate
+python run.py test – run all lexer tests
 
-# Clean generated files
-make clean
+python run.py test-parser – run all parser tests
 
-# Show help
-make help
+python run.py generate – generate expected output files (for both lexer and parser)
 
-Command Line Interface
+python run.py clean – clean temporary files
+
+Command Line Interface(direct)
 
 # Basic usage
-python -m src.cli lex --input <source_file>
-
-# With output file
-python -m src.cli lex --input <source_file> --output <tokens_file>
-
-# Example
-python -m src.cli lex --input examples/hello.src --output tokens.txt
+python -m src.cli lex --input <source_file> [--output <tokens_file>]
+python -m src.cli parse --input <source_file> [--output <ast_file>] [--format text|dot]
 
 Testing
 
@@ -106,16 +142,23 @@ Running Tests
 
 
 # Run all tests
-python test_runner.py
+python run.py test
 
-# Run specific test
-python test_runner.py --test tests/lexer/valid/01_simple_identifiers.src
+# Run only parser tests
+python run.py test-parser
 
-# Generate expected output (for new tests)
-python test_runner.py --generate
+# Run with verbose output
+python run.py test --verbose
+python run.py test-parser --verbose
 
-Token Output Format
 
+Expected output files (.txt) are stored in the repository and are not generated automatically during test runs.
+If you modify the lexer or parser, you must manually regenerate them:
+python run.py generate
+
+This updates all .txt files in tests/lexer/valid/ and tests/parser/valid/.
+
+#Token Output Format
 Tokens are printed in the following format:
 
 LINE:COLUMN TOKEN_TYPE "LEXEME" [LITERAL_VALUE]
@@ -136,10 +179,7 @@ Example:
 4:1 END_OF_FILE ""
 
 =
-Adding New Tests
 
-    Add source file to tests/lexer/valid/ or tests/lexer/invalid/
-    For valid tests, generate expected output: python test_runner.py --generate
 
     Run tests to verify: python test_runner.py
 
@@ -159,3 +199,98 @@ Sprint 1 Deliverables
     Build automation (Makefile)
     Command-line interface
     Error handling with position tracking
+##Sprint 2: Syntax Analysis 
+Grammar Specification
+The language grammar is defined in src/parser/grammar.txt (EBNF).
+Key constructs include:
+
+Program – list of declarations (functions, structs, globals)
+
+Statements – block, if, while, for, return, expression statements, variable declarations
+
+Expressions – with proper precedence and associativity:
+
+Assignment (=, +=, -=, *=, /=)
+
+Logical OR (||)
+
+Logical AND (&&)
+
+Equality (==, !=)
+
+Relational (<, <=, >, >=)
+
+Additive (+, -)
+
+Multiplicative (*, /, %)
+
+Unary (-, !)
+
+Primary (literals, identifiers, parenthesized, calls)
+
+Parser Implementation
+Recursive descent parser with 1-token lookahead.
+
+Error handling – syntax errors reported with line/column; basic recovery.
+
+AST nodes – well-defined hierarchy (ExpressionNode, StatementNode, DeclarationNode).
+
+Abstract Syntax Tree (AST)
+The parser produces an AST that can be output in:
+
+Text format – human-readable with indentation.
+
+DOT format – for visualization with Graphviz.
+
+#Usage Examples
+Parse a source file
+# Text output (default)
+python run.py parse --input examples/factorial.src
+
+# Save to file
+python run.py parse --input examples/factorial.src --output ast.txt
+
+# Generate DOT file
+python run.py parse --input examples/factorial.src --format dot --output ast.dot
+
+# Convert DOT to PNG (requires graphviz)
+dot -Tpng ast.dot -o ast.png
+
+Example Input (examples/example.src)
+
+fn main() -> void {
+    int a = 5;
+    int b = 10;
+    if (a < b) {
+        return a;
+    } else {
+        return b;
+    }
+}
+
+
+AST Output (text format)
+Program [line 1]:
+  FunctionDecl: main -> void [line 1]:
+    Parameters:
+    Body:
+      Block [line 1]:
+        VarDecl: int a = 5 [line 2]
+        VarDecl: int b = 10 [line 3]
+        IfStmt [line 4]:
+          Condition: (a < b)
+          Then:
+            Block [line 4]:
+              Return: a [line 5]
+          Else:
+            Block [line 6]:
+              Return: b [line 7]
+
+#Extending the Parser
+Add new AST node classes in src/parser/ast.py.
+
+Extend the grammar and implement parsing methods in src/parser/parser.py.
+
+Update the printer(s) in ast_printer.py.
+
+Add tests in tests/parser/ and regenerate expected outputs (python run.py generate).
