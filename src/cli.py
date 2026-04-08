@@ -15,6 +15,8 @@ def main():
         parse_command()
     elif command in ('--help', '-h'):
         show_help()
+    elif command == 'semantic':
+        semantic_command()
     else:
         print(f"Unknown command: {command}")
         show_help()
@@ -149,6 +151,55 @@ def parse_command():
     if output_file:
         out.close()
         print(f"AST written to {output_file}")
+
+def semantic_command():
+    # аргументы: --input, --output (опционально), --symbols (опционально)
+    input_file = None
+    output_file = None
+    show_symbols = False
+    i = 2
+    while i < len(sys.argv):
+        arg = sys.argv[i]
+        if arg == '--input' and i+1 < len(sys.argv):
+            input_file = sys.argv[i+1]; i+=2
+        elif arg == '--output' and i+1 < len(sys.argv):
+            output_file = sys.argv[i+1]; i+=2
+        elif arg == '--symbols':
+            show_symbols = True; i+=1
+        else:
+            i+=1
+    if not input_file:
+        print("Error: --input required")
+        sys.exit(1)
+    # читаем файл, лексируем, парсим
+    from src.lexer.scanner import Scanner
+    from src.parser.parser import Parser
+    from src.semantic.analyzer import SemanticAnalyzer
+    from src.parser.ast_printer import ASTPrinter
+
+    with open(input_file, 'r', encoding='utf-8') as f:
+        source = f.read()
+    scanner = Scanner(source)
+    tokens = scanner.scan_tokens()
+    parser = Parser(tokens)
+    ast = parser.parse()
+    analyzer = SemanticAnalyzer()
+    errors = analyzer.analyze(ast)
+
+    out = open(output_file, 'w', encoding='utf-8') if output_file else sys.stdout
+    if show_symbols:
+        out.write(analyzer.sym_table.dump() + "\n")
+    if errors:
+        out.write("Semantic errors:\n")
+        for err in errors:
+            out.write(f"{err}\n")
+    else:
+        out.write("Semantic analysis passed.\n")
+        # можно вывести декорированное AST
+        printer = ASTPrinter()
+        printer.print_text(ast, out)
+    if output_file:
+        out.close()
 
 if __name__ == '__main__':
     main()

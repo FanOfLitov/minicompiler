@@ -188,3 +188,16 @@ class ProgramNode(ASTNode):
 
     def accept(self, visitor):
         return visitor.visit_program(self)
+
+class ASTNode(ABC):
+    def __init__(self, line: int = 0, column: int =0):
+        self.line = line
+        self.column = column
+        self.type = None
+        self.symbol = None
+
+class IdentifierExprNode(ExpressionNode):
+    def __init__(self, name:str, line: int =0, column: int=0):
+        super().__init__(line,column)
+        self.name = name
+        self.symbol = None
