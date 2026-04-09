@@ -195,7 +195,7 @@ def semantic_command():
             out.write(f"{err}\n")
     else:
         out.write("Semantic analysis passed.\n")
-        # можно вывести декорированное AST
+
         printer = ASTPrinter()
         printer.print_text(ast, out)
     if output_file:
