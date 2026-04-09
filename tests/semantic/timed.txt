@@ -1,0 +1,166 @@
+valid/empty_program.src – пустой файл или только пустая программа (без ошибок).
+
+valid/simple_function.src:
+
+c
+fn main() -> int {
+    return 42;
+}
+valid/variable_declaration.src:
+
+c
+fn test() -> void {
+    int x = 10;
+    float y = 3.14;
+    bool b = true;
+}
+valid/type_compatibility_int_float.src:
+
+c
+fn foo() -> void {
+    int a = 5;
+    float b = a;   // int -> float разрешено
+}
+valid/nested_scopes.src:
+
+c
+fn scope() -> int {
+    int x = 1;
+    if (x == 1) {
+        int y = 2;
+        x = y;
+    }
+    return x;
+}
+valid/function_call.src:
+
+c
+fn add(a: int, b: int) -> int {
+    return a + b;
+}
+fn main() -> int {
+    int sum = add(10, 20);
+    return sum;
+}
+valid/struct_usage.src:
+
+c
+struct Point {
+    int x;
+    int y;
+}
+fn main() -> void {
+    Point p;
+    p.x = 10;
+    p.y = 20;
+}
+invalid/undeclared_variable.src:
+
+c
+fn main() -> void {
+    x = 5;
+}
+invalid/undeclared_variable.expected (сгенерировать через python test_semantic.py --generate):
+
+text
+undeclared: Undeclared variable 'x' at 2:5
+invalid/duplicate_function.src:
+
+c
+fn foo() -> void {}
+fn foo() -> int {}
+duplicate_function.expected:
+
+text
+duplicate: Duplicate function 'foo' at 2:1
+invalid/duplicate_variable_local.src:
+
+c
+fn main() -> void {
+    int a;
+    int a;
+}
+duplicate_variable_local.expected:
+
+text
+duplicate: Duplicate variable 'a' in same scope at 3:9
+invalid/type_mismatch_assignment.src:
+
+c
+fn main() -> void {
+    int x;
+    x = 3.14;
+}
+type_mismatch_assignment.expected:
+
+text
+type_mismatch: Type mismatch: cannot assign float to int at 3:9
+invalid/type_mismatch_binary.src:
+
+c
+fn main() -> void {
+    int x = 5 + true;
+}
+type_mismatch_binary.expected:
+
+text
+type_mismatch: Arithmetic operator + requires numeric types, got int and bool at 2:17
+invalid/condition_not_bool.src:
+
+c
+fn main() -> void {
+    if (42) {
+        return;
+    }
+}
+condition_not_bool.expected:
+
+text
+type_mismatch: If condition must be bool, got int at 2:9
+invalid/return_type_mismatch.src:
+
+c
+fn foo() -> int {
+    return 3.14;
+}
+return_type_mismatch.expected:
+
+text
+type_mismatch: Return type mismatch: expected int, got float at 2:12
+invalid/argument_count_mismatch.src:
+
+c
+fn add(a: int, b: int) -> int {
+    return a + b;
+}
+fn main() -> int {
+    return add(5);
+}
+argument_count_mismatch.expected:
+
+text
+argument_count: Function expects 2 arguments, got 1 at 5:12
+invalid/argument_type_mismatch.src:
+
+c
+fn add(a: int, b: int) -> int {
+    return a + b;
+}
+fn main() -> int {
+    return add(5, 3.14);
+}
+argument_type_mismatch.expected:
+
+text
+argument_type: Argument 2 type mismatch: expected int, got float at 5:18
+invalid/struct_field_duplicate.src:
+
+c
+struct Point {
+    int x;
+    int x;
+}
+struct_field_duplicate.expected:
+
+text
+duplicate: Duplicate field 'x' in struct 'Point' at 3:9
