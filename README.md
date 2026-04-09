@@ -292,3 +292,104 @@ Extend the grammar and implement parsing methods in src/parser/parser.py.
 Update the printer(s) in ast_printer.py.
 
 Add tests in tests/parser/ and regenerate expected outputs (python run.py generate).
+
+
+
+## Sprint 3: Semantic Analysis (Complete)
+
+### Overview
+
+The semantic analyzer validates the meaning of the program:
+- Checks declarations and scopes
+- Performs type checking for expressions, assignments, and function calls
+- Reports detailed errors with location information
+- Decorates the AST with type information for later code generation
+
+### Symbol Table
+
+The symbol table manages identifiers across nested scopes:
+
+- **Global scope** – functions, structs, global variables
+- **Function scope** – parameters and local variables
+- **Block scope** – inside `{ ... }` (if, while, for)
+- **Struct scope** – field names
+
+Each symbol stores:
+- Name, kind (variable, function, parameter, struct, field)
+- Type (primitive, struct, function, array)
+- Declaration location (line, column)
+- Additional info for functions (parameters) and structs (fields)
+
+### Type System
+
+Built‑in primitive types: `int`, `float`, `bool`, `void`, `string`
+
+Type compatibility rules:
+- `int` can be implicitly converted to `float` (widening)
+- No implicit conversion from `float` to `int`
+- Assignment requires compatible types (LHS must be assignable)
+- Binary operators follow numeric promotion rules
+- Logical operators require `bool` operands
+
+### Usage
+
+Run semantic analysis on a source file:
+
+```bash
+# Basic check (outputs decorated AST or errors)
+python run.py semantic --input examples/program.src
+
+# Save output to file
+python run.py semantic --input examples/program.src --output analysis.txt
+
+# Dump symbol table
+python run.py semantic --input examples/program.src --symbols
+
+# Run semantic tests
+python run.py test-semantic
+Direct CLI:
+
+bash
+python -m src.cli semantic --input program.src [--output out.txt] [--symbols]
+Error Reporting Example
+text
+type_mismatch: Cannot assign float to int at 5:9
+   |
+   |     int x = 3.14;
+   |             ^^^^
+   |
+   = expected: int
+   = found: float
+Testing
+Semantic tests are located in tests/semantic/:
+
+Valid tests – programs that must pass without errors.
+
+Invalid tests – programs that contain semantic errors; each has an .expected file with the exact error messages.
+
+Run all semantic tests:
+
+bash
+python test_semantic.py
+Generate expected outputs for invalid tests (after modifying the analyzer):
+
+bash
+python test_semantic.py --generate
+Next Steps
+Sprint 4 will introduce an intermediate representation (IR) and simple code generation.
+
+text
+
+---
+
+## 4. Запуск и проверка
+
+После создания всех файлов:
+
+1. Сгенерируйте эталонные файлы для invalid тестов:
+   ```bash
+   python test_semantic.py --generate
+Запустите все семантические тесты:
+
+bash
+python test_semantic.py
