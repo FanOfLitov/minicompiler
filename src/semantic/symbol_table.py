@@ -1,66 +1,101 @@
-from enum import Enum
-from typing import Dict, Optional, List, Any
-from .type_system import Type
+"""
+Hierarchical Scope and Symbol Table for Python 3.8+.
+"""
+from dataclasses import dataclass, field
+from typing import Dict, List, Optional
 
-class SymbolKind(Enum):
-    VARIABLE = 1
-    FUNCTION = 2
-    PARAMETER = 3
-    STRUCT = 4
-    FIELD = 5
+
+class SymbolKind:
+    VARIABLE  = "variable"
+    PARAMETER = "parameter"
+    FUNCTION  = "function"
+    STRUCT    = "struct"
+
 
 @dataclass
-class SymbolInfo:
-    name: str
-    kind: SymbolKind
-    type: Type
-    line: int
-    column: int
-    # Для функций
-    parameters: Optional[List['SymbolInfo']] = None
-    # Для структур
-    fields: Optional[Dict[str, Type]] = None
+class Symbol:
+    name:         str
+    kind:         str
+    type:         "Type"  # Forward reference string
+    decl_line:    int
+    decl_column:  int
+    stack_offset: Optional[int] = None
+    is_initialized: bool = False
 
-class SymbolTable:
-    def __init__(self):
-        self.scopes = [{}]          # список словарей: текущая область
-        self.scope_names = ['global']  # имена областей для отладки
 
-    def enter_scope(self, name: str = 'block'):
-        self.scopes.append({})
-        self.scope_names.append(name)
+@dataclass
+class Scope:
+    name:    str
+    parent:  Optional["Scope"]
+    symbols: Dict[str, Symbol] = field(default_factory=dict)
 
-    def exit_scope(self):
-        if len(self.scopes) > 1:
-            self.scopes.pop()
-            self.scope_names.pop()
-
-    def insert(self, symbol: SymbolInfo) -> bool:
-        """Вставить символ в текущую область. Возвращает False, если уже существует."""
-        current = self.scopes[-1]
-        if symbol.name in current:
+    def define(self, symbol: Symbol) -> bool:
+        if symbol.name in self.symbols:
             return False
-        current[symbol.name] = symbol
+        self.symbols[symbol.name] = symbol
         return True
 
-    def lookup(self, name: str) -> Optional[SymbolInfo]:
-        """Поиск во всех видимых областях (от внутренней к глобальной)."""
-        for scope in reversed(self.scopes):
-            if name in scope:
-                return scope[name]
+    def lookup_local(self, name: str) -> Optional[Symbol]:
+        return self.symbols.get(name)
+
+    def lookup(self, name: str) -> Optional[Symbol]:
+        scope: Optional[Scope] = self
+        while scope is not None:
+            sym = scope.symbols.get(name)
+            if sym is not None:
+                return sym
+            scope = scope.parent
         return None
 
-    def lookup_local(self, name: str) -> Optional[SymbolInfo]:
-        """Поиск только в текущей области."""
-        return self.scopes[-1].get(name)
+    def dump(self, indent: int = 0) -> str:
+        lines = ["  " * indent + f"Scope({self.name}):"]
+        for sym in self.symbols.values():
+            lines.append(
+                "  " * (indent + 1)
+                + f"{sym.kind} {sym.name}: {sym.type}"
+                + f" (declared at {sym.decl_line}:{sym.decl_column})"
+            )
+        return '\n'.join(lines)
 
-    def get_current_scope(self) -> Dict[str, SymbolInfo]:
-        return self.scopes[-1]
+
+class SymbolTable:
+    def __init__(self) -> None:
+        self._global = Scope("global", parent=None)
+        self._stack: List[Scope] = [self._global]
+
+    def enter_scope(self, name: str = "") -> Scope:
+        label = name or f"block@{id(self)}"
+        scope = Scope(label, parent=self.current_scope)
+        self._stack.append(scope)
+        return scope
+
+    def exit_scope(self) -> Scope:
+        if len(self._stack) == 1:
+            raise RuntimeError("Cannot exit global scope")
+        return self._stack.pop()
+
+    @property
+    def current_scope(self) -> Scope:
+        return self._stack[-1]
+
+    @property
+    def global_scope(self) -> Scope:
+        return self._global
+
+    def depth(self) -> int:
+        return len(self._stack)
+
+    def define(self, symbol: Symbol) -> bool:
+        return self.current_scope.define(symbol)
+
+    def lookup(self, name: str) -> Optional[Symbol]:
+        return self.current_scope.lookup(name)
+
+    def lookup_local(self, name: str) -> Optional[Symbol]:
+        return self.current_scope.lookup_local(name)
+
+    def lookup_global(self, name: str) -> Optional[Symbol]:
+        return self._global.lookup_local(name)
 
     def dump(self) -> str:
-        lines = []
-        for i, scope in enumerate(self.scopes):
-            lines.append(f"Scope {i}: {self.scope_names[i]}")
-            for name, sym in scope.items():
-                lines.append(f"  {name}: {sym.kind.name} : {sym.type}")
-        return '\n'.join(lines)
+        return self._global.dump(0)

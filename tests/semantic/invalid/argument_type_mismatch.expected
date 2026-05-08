@@ -1,0 +1,3 @@
+semantic error at argument_type_mismatch.src:5:12: call to undeclared function 'add'
+semantic error at argument_type_mismatch.src:5:5: return type mismatch in 'main': expected int, got void
+  note: function declared at 4:1

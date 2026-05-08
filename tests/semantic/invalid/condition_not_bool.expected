@@ -1,0 +1,1 @@
+semantic error at condition_not_bool.src:2:9: condition in 'if' must be bool, got int

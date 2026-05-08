@@ -1,353 +1,428 @@
-# src/parser/parser.py
-from typing import List, Optional
-from src.lexer.token import Token, TokenType
-from src.parser.ast import *
+
+from typing import List, Optional, Callable, Set
+from src.lexer.token_types import Token, TokenType
+from .ast_nodes import (
+    ExpressionNode, StatementNode, DeclarationNode,
+    ProgramNode, FunctionDeclNode, StructDeclNode, ParamNode,
+    BlockStmtNode, VarDeclStmtNode, ExprStmtNode,
+    IfStmtNode, WhileStmtNode, ForStmtNode, ReturnStmtNode,
+    LiteralExprNode, IdentifierExprNode, BinaryExprNode,
+    UnaryExprNode, CallExprNode, AssignmentExprNode,
+)
 
 class ParseError(Exception):
-    def __init__(self, token: Token, message: str):
-        self.token = token
+    def __init__(self, message: str, token: Token) -> None:
+        super().__init__(message)
+        self.token   = token
         self.message = message
 
+
+class ParserDiagnostic:
+    def __init__(self, message: str, line: int, column: int) -> None:
+        self.message = message
+        self.line    = line
+        self.column  = column
+
+    def __str__(self) -> str:
+        return f"parse error at {self.line}:{self.column}: {self.message}"
+
+
+_TYPE_KEYWORDS: Set[TokenType] = {
+    TokenType.KW_INT, TokenType.KW_FLOAT,
+    TokenType.KW_BOOL, TokenType.KW_VOID,
+    TokenType.IDENTIFIER,
+}
+
+_ASSIGN_OPS: Set[TokenType] = {
+    TokenType.ASSIGN, TokenType.PLUS_ASSIGN,
+    TokenType.MINUS_ASSIGN, TokenType.STAR_ASSIGN,
+    TokenType.SLASH_ASSIGN,
+}
+
+
 class Parser:
-    def __init__(self, tokens: List[Token]):
-        self.tokens = tokens
-        self.current = 0
-        self.errors = []
+    def __init__(self, tokens: List[Token]) -> None:
+        self._tokens:  List[Token]           = tokens
+        self._pos:     int                   = 0
+        self.errors:   List[ParserDiagnostic] = []
 
-    def is_at_end(self) -> bool:
-        return self.current >= len(self.tokens) or self.peek().type == TokenType.END_OF_FILE
+    def parse(self) -> Optional[ProgramNode]:
+        try:
+            return self._parse_program()
+        except ParseError as e:
+            self._record_error(e.message, e.token)
+            return None
 
-    def peek(self) -> Token:
-        return self.tokens[self.current]
-
-    def previous(self) -> Token:
-        return self.tokens[self.current - 1]
-
-    def advance(self) -> Token:
-        if not self.is_at_end():
-            self.current += 1
-        return self.previous()
-
-    def match(self, *types: TokenType) -> bool:
-        if self.check(*types):
-            self.advance()
-            return True
-        return False
-
-    def check(self, *types: TokenType) -> bool:
-        if self.is_at_end():
-            return False
-        return self.peek().type in types
-
-    def consume(self, token_type: TokenType, message: str) -> Token:
-        if self.check(token_type):
-            return self.advance()
-        raise ParseError(self.peek(), message)
-
-    def synchronize(self):
-        # Синхронизация после ошибки: пропускаем до точки синхронизации (; или })
-        while not self.is_at_end():
-            if self.previous().type == TokenType.SEMICOLON:
-                return
-            if self.peek().type == TokenType.RBRACE:
-                return
-            self.advance()
-
-    # ---------- Грамматика ----------
-    def parse(self) -> ProgramNode:
-        declarations = []
-        while not self.is_at_end():
+    def _parse_program(self) -> ProgramNode:
+        decls: List[DeclarationNode] = []
+        while not self._is_at_end():
             try:
-                decl = self.declaration()
-                declarations.append(decl)
+                decls.append(self._parse_declaration())
             except ParseError as e:
-                self.errors.append((e.token, e.message))
-                self.synchronize()
-        return ProgramNode(declarations)
+                self._record_error(e.message, e.token)
+                self._synchronize_declaration()
+        return ProgramNode(declarations=decls, line=1, column=1)
 
-    def declaration(self) -> DeclarationNode:
-        if self.match(TokenType.KW_FN):
-            return self.function_decl()
-        if self.match(TokenType.KW_STRUCT):
-            return self.struct_decl()
+    def _parse_declaration(self) -> DeclarationNode:
+        if self._check(TokenType.KW_FN):
+            return self._parse_function_decl()
+        if self._check(TokenType.KW_STRUCT):
+            return self._parse_struct_decl()
+        return self._parse_var_decl()
 
-        return self.var_decl()
+    def _parse_function_decl(self) -> FunctionDeclNode:
+        tok = self._consume(TokenType.KW_FN, "expected 'fn'")
+        name_tok = self._consume(TokenType.IDENTIFIER, "expected function name")
+        self._consume(TokenType.LPAREN, "expected '('")
 
-    def function_decl(self) -> FunctionDeclNode:
-        # fn name ( params ) [-> type] block
-        line = self.previous().line
-        column = self.previous().column
-        name_token = self.consume(TokenType.IDENTIFIER, "Expected function name")
-        name = name_token.lexeme
-        self.consume(TokenType.LPAREN, "Expected '(' after function name")
-        parameters = []
-        if not self.check(TokenType.RPAREN):
-            parameters = self.parameters()
-        self.consume(TokenType.RPAREN, "Expected ')' after parameters")
-        return_type = "void"
-        if self.match(TokenType.MINUS, TokenType.GT):  # "->"
-            return_type = self.type_name()
-        body = self.block()
-        return FunctionDeclNode(return_type, name, parameters, body, line, column)
+        params: List[ParamNode] = []
+        if not self._check(TokenType.RPAREN):
+            params = self._parse_params()
 
-    def parameters(self) -> List[ParamNode]:
-        params = []
-        first = True
-        while not self.check(TokenType.RPAREN):
-            if not first:
-                self.consume(TokenType.COMMA, "Expected ',' between parameters")
-            param_type = self.type_name()
-            param_name = self.consume(TokenType.IDENTIFIER, "Expected parameter name")
-            params.append(ParamNode(param_type, param_name.lexeme,
-                                    line=param_name.line, column=param_name.column))
-            first = False
+        self._consume(TokenType.RPAREN, "expected ')'")
+
+        ret_type = "void"
+        if self._match(TokenType.ARROW):
+            ret_type = self._parse_type()
+
+        body = self._parse_block()
+        return FunctionDeclNode(
+            return_type=ret_type,
+            name=name_tok.lexeme,
+            params=params,
+            body=body,
+            line=tok.line,
+            column=tok.column,
+        )
+
+    def _parse_struct_decl(self) -> StructDeclNode:
+        tok = self._consume(TokenType.KW_STRUCT, "expected 'struct'")
+        name_tok = self._consume(TokenType.IDENTIFIER, "expected struct name")
+        self._consume(TokenType.LBRACE, "expected '{'")
+
+        fields: List[VarDeclStmtNode] = []
+        while not self._check(TokenType.RBRACE) and not self._is_at_end():
+            fields.append(self._parse_var_decl())
+
+        self._consume(TokenType.RBRACE, "expected '}'")
+        return StructDeclNode(
+            name=name_tok.lexeme,
+            fields=fields,
+            line=tok.line,
+            column=tok.column,
+        )
+
+    def _parse_params(self) -> List[ParamNode]:
+        params: List[ParamNode] = [self._parse_single_param()]
+        while self._match(TokenType.COMMA):
+            params.append(self._parse_single_param())
         return params
 
-    def type_name(self) -> str:
-        # Пока поддерживаем базовые типы и идентификаторы (для структур)
-        if self.match(TokenType.KW_INT):
-            return "int"
-        if self.match(TokenType.KW_FLOAT):
-            return "float"
-        if self.match(TokenType.KW_BOOL):
-            return "bool"
-        if self.match(TokenType.KW_VOID):
-            return "void"
-        if self.check(TokenType.IDENTIFIER):
-            token = self.advance()
-            return token.lexeme
-        raise ParseError(self.peek(), f"Expected type, got {self.peek().type}")
+    def _parse_single_param(self) -> ParamNode:
+        type_tok = self._peek()
+        ptype    = self._parse_type()
+        name_tok = self._consume(TokenType.IDENTIFIER, "expected parameter name")
+        return ParamNode(param_type=ptype, name=name_tok.lexeme,
+                         line=type_tok.line, column=type_tok.column)
 
-    def struct_decl(self) -> StructDeclNode:
-        # struct Name { varDecls }
-        line = self.previous().line
-        column = self.previous().column
-        name_token = self.consume(TokenType.IDENTIFIER, "Expected struct name")
-        name = name_token.lexeme
-        self.consume(TokenType.LBRACE, "Expected '{' after struct name")
-        fields = []
-        while not self.check(TokenType.RBRACE) and not self.is_at_end():
-            # var_decl внутри структуры
-            var_decl = self.var_decl()
-            fields.append(var_decl)
-        self.consume(TokenType.RBRACE, "Expected '}' after struct fields")
-        return StructDeclNode(name, fields, line, column)
+    def _parse_type(self) -> str:
+        tok = self._peek()
+        if tok.type in _TYPE_KEYWORDS:
+            self._advance()
+            return tok.lexeme
+        raise ParseError(f"expected type, got {tok.lexeme!r}", tok)
 
-    def var_decl(self) -> VarDeclStmtNode:
-        # type name [ = expr ] ;
-        var_type = self.type_name()
-        name_token = self.consume(TokenType.IDENTIFIER, "Expected variable name")
-        name = name_token.lexeme
-        initializer = None
-        if self.match(TokenType.ASSIGN):
-            initializer = self.expression()
-        self.consume(TokenType.SEMICOLON, "Expected ';' after variable declaration")
-        return VarDeclStmtNode(var_type, name, initializer,
-                               line=name_token.line, column=name_token.column)
+    def _parse_statement(self) -> StatementNode:
+        if self._check(TokenType.LBRACE):
+            return self._parse_block()
+        if self._check(TokenType.KW_IF):
+            return self._parse_if()
+        if self._check(TokenType.KW_WHILE):
+            return self._parse_while()
+        if self._check(TokenType.KW_FOR):
+            return self._parse_for()
+        if self._check(TokenType.KW_RETURN):
+            return self._parse_return()
+        if self._is_type_start():
+            return self._parse_var_decl()
+        return self._parse_expr_stmt()
 
-    def statement(self) -> StatementNode:
-        if self.match(TokenType.LBRACE):
-            return self.block()
-        if self.match(TokenType.KW_IF):
-            return self.if_stmt()
-        if self.match(TokenType.KW_WHILE):
-            return self.while_stmt()
-        if self.match(TokenType.KW_FOR):
-            return self.for_stmt()
-        if self.match(TokenType.KW_RETURN):
-            return self.return_stmt()
+    def _parse_block(self) -> BlockStmtNode:
+        tok = self._consume(TokenType.LBRACE, "expected '{'")
+        stmts: List[StatementNode] = []
 
-        if self.check(TokenType.KW_INT, TokenType.KW_FLOAT, TokenType.KW_BOOL, TokenType.IDENTIFIER):
+        while not self._check(TokenType.RBRACE) and not self._is_at_end():
+            try:
+                stmts.append(self._parse_statement())
+            except ParseError as e:
+                self._record_error(e.message, e.token)
+                self._synchronize_statement()
 
-           return self.var_decl()
-        # В противном случае это выражение-оператор
-        expr = self.expression()
-        self.consume(TokenType.SEMICOLON, "Expected ';' after expression")
-        return ExprStmtNode(expr, line=expr.line, column=expr.column)
+        self._consume(TokenType.RBRACE, "expected '}'")
+        return BlockStmtNode(statements=stmts, line=tok.line, column=tok.column)
 
-    def block(self) -> BlockStmtNode:
-        # { statements }
-        line = self.previous().line
-        column = self.previous().column
-        statements = []
-        while not self.check(TokenType.RBRACE) and not self.is_at_end():
-            stmt = self.statement()
-            statements.append(stmt)
-        self.consume(TokenType.RBRACE, "Expected '}' after block")
-        return BlockStmtNode(statements, line, column)
+    def _parse_if(self) -> IfStmtNode:
+        tok = self._consume(TokenType.KW_IF, "expected 'if'")
+        self._consume(TokenType.LPAREN, "expected '('")
+        cond = self._parse_expression()
+        self._consume(TokenType.RPAREN, "expected ')'")
+        then_branch = self._parse_statement()
 
-    def if_stmt(self) -> IfStmtNode:
-        line = self.previous().line
-        column = self.previous().column
-        self.consume(TokenType.LPAREN, "Expected '(' after 'if'")
-        condition = self.expression()
-        self.consume(TokenType.RPAREN, "Expected ')' after condition")
-        then_branch = self.statement()
-        else_branch = None
-        if self.match(TokenType.KW_ELSE):
-            else_branch = self.statement()
-        return IfStmtNode(condition, then_branch, else_branch, line, column)
+        else_branch: Optional[StatementNode] = None
+        if self._match(TokenType.KW_ELSE):
+            else_branch = self._parse_statement()
 
-    def while_stmt(self) -> WhileStmtNode:
-        line = self.previous().line
-        column = self.previous().column
-        self.consume(TokenType.LPAREN, "Expected '(' after 'while'")
-        condition = self.expression()
-        self.consume(TokenType.RPAREN, "Expected ')' after condition")
-        body = self.statement()
-        return WhileStmtNode(condition, body, line, column)
+        return IfStmtNode(condition=cond, then_branch=then_branch,
+                          else_branch=else_branch, line=tok.line, column=tok.column)
 
-    def for_stmt(self) -> ForStmtNode:
-        line = self.previous().line
-        column = self.previous().column
-        self.consume(TokenType.LPAREN, "Expected '(' after 'for'")
-        # init
-        init = None
-        if not self.check(TokenType.SEMICOLON):
-            if self.check(TokenType.KW_INT, TokenType.KW_FLOAT, TokenType.KW_BOOL, TokenType.IDENTIFIER):
-                               init = self.expression_statement()  # expression followed by semicolon
+    def _parse_while(self) -> WhileStmtNode:
+        tok = self._consume(TokenType.KW_WHILE, "expected 'while'")
+        self._consume(TokenType.LPAREN, "expected '('")
+        cond = self._parse_expression()
+        self._consume(TokenType.RPAREN, "expected ')'")
+        body = self._parse_statement()
+        return WhileStmtNode(condition=cond, body=body, line=tok.line, column=tok.column)
+
+    def _parse_for(self) -> ForStmtNode:
+        tok = self._consume(TokenType.KW_FOR, "expected 'for'")
+        self._consume(TokenType.LPAREN, "expected '('")
+
+        init: Optional[StatementNode] = None
+        if not self._check(TokenType.SEMICOLON):
+            if self._is_type_start():
+                init = self._parse_var_decl()
             else:
-                init = self.expression_statement()
+                init = self._parse_expr_stmt()
         else:
-            # пропускаем точку с запятой
-            self.consume(TokenType.SEMICOLON, "Expected ';' after for init")
-        # condition
-        condition = None
-        if not self.check(TokenType.SEMICOLON):
-            condition = self.expression()
-        self.consume(TokenType.SEMICOLON, "Expected ';' after for condition")
-        # update
-        update = None
-        if not self.check(TokenType.RPAREN):
-            update = self.expression()
-        self.consume(TokenType.RPAREN, "Expected ')' after for update")
-        body = self.statement()
-        return ForStmtNode(init, condition, update, body, line, column)
+            self._advance()
 
-    def expression_statement(self) -> StatementNode:
-        # парсит выражение и следующую точку с запятой, возвращает ExprStmtNode
-        expr = self.expression()
-        self.consume(TokenType.SEMICOLON, "Expected ';' after expression")
-        return ExprStmtNode(expr)
+        condition: Optional[ExpressionNode] = None
+        if not self._check(TokenType.SEMICOLON):
+            condition = self._parse_expression()
+        self._consume(TokenType.SEMICOLON, "expected ';'")
 
-    def return_stmt(self) -> ReturnStmtNode:
-        line = self.previous().line
-        column = self.previous().column
-        value = None
-        if not self.check(TokenType.SEMICOLON):
-            value = self.expression()
-        self.consume(TokenType.SEMICOLON, "Expected ';' after return")
-        return ReturnStmtNode(value, line, column)
+        update: Optional[ExpressionNode] = None
+        if not self._check(TokenType.RPAREN):
+            update = self._parse_expression()
+        self._consume(TokenType.RPAREN, "expected ')'")
 
-    def expression(self) -> ExpressionNode:
-        return self.assignment()
+        body = self._parse_statement()
+        return ForStmtNode(init=init, condition=condition,
+                           update=update, body=body, line=tok.line, column=tok.column)
 
-    def assignment(self) -> ExpressionNode:
-        # left = assignment | logical_or
-        left = self.logical_or()
-        if self.match(TokenType.ASSIGN, TokenType.PLUS_ASSIGN, TokenType.MINUS_ASSIGN,
-                      TokenType.STAR_ASSIGN, TokenType.SLASH_ASSIGN):
-            op = self.previous().lexeme
-            right = self.assignment()
-            return AssignmentExprNode(left, op, right, line=left.line, column=left.column)
+    def _parse_return(self) -> ReturnStmtNode:
+        tok = self._consume(TokenType.KW_RETURN, "expected 'return'")
+        value: Optional[ExpressionNode] = None
+        if not self._check(TokenType.SEMICOLON):
+            value = self._parse_expression()
+        self._consume(TokenType.SEMICOLON, "expected ';'")
+        return ReturnStmtNode(value=value, line=tok.line, column=tok.column)
+
+    def _parse_var_decl(self) -> VarDeclStmtNode:
+        type_tok = self._peek()
+        vtype    = self._parse_type()
+        name_tok = self._consume(TokenType.IDENTIFIER, "expected variable name")
+        init: Optional[ExpressionNode] = None
+        if self._match(TokenType.ASSIGN):
+            init = self._parse_expression()
+        self._consume(TokenType.SEMICOLON, "expected ';'")
+        return VarDeclStmtNode(
+            var_type=vtype,
+            name=name_tok.lexeme,
+            initializer=init,
+            line=type_tok.line,
+            column=type_tok.column,
+        )
+
+    def _parse_expr_stmt(self) -> ExprStmtNode:
+        tok  = self._peek()
+        expr = self._parse_expression()
+        self._consume(TokenType.SEMICOLON, "expected ';'")
+        return ExprStmtNode(expression=expr, line=tok.line, column=tok.column)
+
+    def _parse_expression(self) -> ExpressionNode:
+        return self._parse_assignment()
+
+    def _parse_assignment(self) -> ExpressionNode:
+        expr = self._parse_logical_or()
+        if self._peek().type in _ASSIGN_OPS:
+            op_tok = self._advance()
+            if not isinstance(expr, IdentifierExprNode):
+                raise ParseError("invalid assignment target", op_tok)
+            value = self._parse_assignment()
+            return AssignmentExprNode(
+                target=expr.name,
+                operator=op_tok.lexeme,
+                value=value,
+                line=op_tok.line,
+                column=op_tok.column,
+            )
+        return expr
+
+    def _parse_logical_or(self) -> ExpressionNode:
+        return self._parse_left_assoc(self._parse_logical_and, {TokenType.PIPE_PIPE})
+
+    def _parse_logical_and(self) -> ExpressionNode:
+        return self._parse_left_assoc(self._parse_equality, {TokenType.AMP_AMP})
+
+    def _parse_equality(self) -> ExpressionNode:
+        return self._parse_left_assoc(self._parse_relational, {TokenType.EQ_EQ, TokenType.BANG_EQ})
+
+    def _parse_relational(self) -> ExpressionNode:
+        return self._parse_left_assoc(
+            self._parse_additive,
+            {TokenType.LT, TokenType.LT_EQ, TokenType.GT, TokenType.GT_EQ}
+        )
+
+    def _parse_additive(self) -> ExpressionNode:
+        return self._parse_left_assoc(self._parse_multiplicative, {TokenType.PLUS, TokenType.MINUS})
+
+    def _parse_multiplicative(self) -> ExpressionNode:
+        return self._parse_left_assoc(
+            self._parse_unary,
+            {TokenType.STAR, TokenType.SLASH, TokenType.PERCENT}
+        )
+
+    def _parse_left_assoc(
+        self,
+        next_rule: Callable[[], ExpressionNode],
+        ops: Set[TokenType],
+    ) -> ExpressionNode:
+        left = next_rule()
+        while self._peek().type in ops:
+            op_tok = self._advance()
+            right  = next_rule()
+            left   = BinaryExprNode(
+                left=left, operator=op_tok.lexeme, right=right,
+                line=op_tok.line, column=op_tok.column,
+            )
         return left
 
-    def logical_or(self) -> ExpressionNode:
-        left = self.logical_and()
-        while self.match(TokenType.OR):
-            op = self.previous().lexeme
-            right = self.logical_and()
-            left = BinaryExprNode(left, op, right, line=left.line, column=left.column)
-        return left
+    def _parse_unary(self) -> ExpressionNode:
+        if self._peek().type in {TokenType.MINUS, TokenType.BANG}:
+            op_tok  = self._advance()
+            operand = self._parse_unary()
+            return UnaryExprNode(
+                operator=op_tok.lexeme,
+                operand=operand,
+                line=op_tok.line,
+                column=op_tok.column,
+            )
+        return self._parse_primary()
 
-    def logical_and(self) -> ExpressionNode:
-        left = self.equality()
-        while self.match(TokenType.AND):
-            op = self.previous().lexeme
-            right = self.equality()
-            left = BinaryExprNode(left, op, right, line=left.line, column=left.column)
-        return left
+    def _parse_primary(self) -> ExpressionNode:
+        tok = self._peek()
 
-    def equality(self) -> ExpressionNode:
-        left = self.relational()
-        while self.match(TokenType.EQ, TokenType.NE):
-            op = self.previous().lexeme
-            right = self.relational()
-            left = BinaryExprNode(left, op, right, line=left.line, column=left.column)
-        return left
+        if tok.type == TokenType.INT_LITERAL:
+            self._advance()
+            return LiteralExprNode(value=tok.literal, kind='int', line=tok.line, column=tok.column)
+        if tok.type == TokenType.FLOAT_LITERAL:
+            self._advance()
+            return LiteralExprNode(value=tok.literal, kind='float', line=tok.line, column=tok.column)
+        if tok.type == TokenType.BOOL_LITERAL:
+            self._advance()
+            return LiteralExprNode(value=tok.literal, kind='bool', line=tok.line, column=tok.column)
+        if tok.type == TokenType.STRING_LITERAL:
+            self._advance()
+            return LiteralExprNode(value=tok.literal, kind='string', line=tok.line, column=tok.column)
+        if tok.type == TokenType.KW_NULL:
+            self._advance()
+            return LiteralExprNode(value=None, kind='null', line=tok.line, column=tok.column)
 
-    def relational(self) -> ExpressionNode:
-        left = self.additive()
-        while self.match(TokenType.LT, TokenType.LE, TokenType.GT, TokenType.GE):
-            op = self.previous().lexeme
-            right = self.additive()
-            left = BinaryExprNode(left, op, right, line=left.line, column=left.column)
-        return left
+        if tok.type == TokenType.IDENTIFIER:
+            self._advance()
+            if self._check(TokenType.LPAREN):
+                return self._parse_call(tok)
+            return IdentifierExprNode(name=tok.lexeme, line=tok.line, column=tok.column)
 
-    def additive(self) -> ExpressionNode:
-        left = self.multiplicative()
-        while self.match(TokenType.PLUS, TokenType.MINUS):
-            op = self.previous().lexeme
-            right = self.multiplicative()
-            left = BinaryExprNode(left, op, right, line=left.line, column=left.column)
-        return left
-
-    def multiplicative(self) -> ExpressionNode:
-        left = self.unary()
-        while self.match(TokenType.STAR, TokenType.SLASH, TokenType.PERCENT):
-            op = self.previous().lexeme
-            right = self.unary()
-            left = BinaryExprNode(left, op, right, line=left.line, column=left.column)
-        return left
-
-    def unary(self) -> ExpressionNode:
-        if self.match(TokenType.MINUS, TokenType.NOT):
-            op = self.previous().lexeme
-            right = self.unary()
-            return UnaryExprNode(op, right, line=self.previous().line, column=self.previous().column)
-        return self.primary()
-
-    def primary(self) -> ExpressionNode:
-        if self.match(TokenType.INT_LITERAL):
-            token = self.previous()
-            return LiteralExprNode(token.literal, token.line, token.column)
-        if self.match(TokenType.FLOAT_LITERAL):
-            token = self.previous()
-            return LiteralExprNode(token.literal, token.line, token.column)
-        if self.match(TokenType.STRING_LITERAL):
-            token = self.previous()
-            return LiteralExprNode(token.literal, token.line, token.column)
-        if self.match(TokenType.KW_TRUE, TokenType.KW_FALSE):
-            token = self.previous()
-            value = True if token.type == TokenType.KW_TRUE else False
-            return LiteralExprNode(value, token.line, token.column)
-        if self.match(TokenType.IDENTIFIER):
-            token = self.previous()
-            if self.match(TokenType.LPAREN):
-                return self.finish_call(token)
-            return IdentifierExprNode(token.lexeme, token.line, token.column)
-        if self.match(TokenType.LPAREN):
-            expr = self.expression()
-            self.consume(TokenType.RPAREN, "Expected ')' after expression")
+        if tok.type == TokenType.LPAREN:
+            self._advance()
+            expr = self._parse_expression()
+            self._consume(TokenType.RPAREN, "expected ')'")
             return expr
-        raise ParseError(self.peek(), f"Unexpected token in primary: {self.peek().type}")
 
-    def finish_call(self, callee_token: Token) -> CallExprNode:
-        # callee_token is the identifier token
-        callee = IdentifierExprNode(callee_token.lexeme, callee_token.line, callee_token.column)
-        arguments = []
-        if not self.check(TokenType.RPAREN):
-            arguments = self.arguments()
-        self.consume(TokenType.RPAREN, "Expected ')' after function call")
-        return CallExprNode(callee, arguments, line=callee_token.line, column=callee_token.column)
+        raise ParseError(f"unexpected token {tok.lexeme!r}", tok)
 
-    def arguments(self) -> List[ExpressionNode]:
-        args = []
-        first = True
-        while not self.check(TokenType.RPAREN):
-            if not first:
-                self.consume(TokenType.COMMA, "Expected ',' between arguments")
-            arg = self.expression()
-            args.append(arg)
-            first = False
-        return args
+    def _parse_call(self, name_tok: Token) -> CallExprNode:
+        self._consume(TokenType.LPAREN, "expected '('")
+        args: List[ExpressionNode] = []
+        if not self._check(TokenType.RPAREN):
+            args.append(self._parse_expression())
+            while self._match(TokenType.COMMA):
+                args.append(self._parse_expression())
+        self._consume(TokenType.RPAREN, "expected ')'")
+        return CallExprNode(callee=name_tok.lexeme, arguments=args,
+                            line=name_tok.line, column=name_tok.column)
+
+    def _peek(self) -> Token:
+        return self._tokens[self._pos]
+
+    def _peek_next(self) -> Token:
+        idx = min(self._pos + 1, len(self._tokens) - 1)
+        return self._tokens[idx]
+
+    def _advance(self) -> Token:
+        tok = self._tokens[self._pos]
+        if not self._is_at_end():
+            self._pos += 1
+        return tok
+
+    def _is_at_end(self) -> bool:
+        return self._tokens[self._pos].type == TokenType.EOF
+
+    def _check(self, ttype: TokenType) -> bool:
+        return not self._is_at_end() and self._peek().type == ttype
+
+    def _match(self, *types: TokenType) -> bool:
+        for ttype in types:
+            if self._check(ttype):
+                self._advance()
+                return True
+        return False
+
+    def _consume(self, ttype: TokenType, message: str) -> Token:
+        if self._check(ttype):
+            return self._advance()
+        tok = self._peek()
+        raise ParseError(f"{message}; got {tok.lexeme!r}", tok)
+
+    def _is_type_start(self) -> bool:
+        if self._peek().type not in _TYPE_KEYWORDS:
+            return False
+        return self._peek_next().type == TokenType.IDENTIFIER
+
+    def _record_error(self, message: str, token: Token) -> None:
+        self.errors.append(ParserDiagnostic(message, token.line, token.column))
+
+    def _synchronize_statement(self) -> None:
+        while not self._is_at_end():
+            if self._peek().type == TokenType.SEMICOLON:
+                self._advance()
+                return
+            if self._peek().type in {
+                TokenType.KW_IF, TokenType.KW_WHILE, TokenType.KW_FOR,
+                TokenType.KW_RETURN, TokenType.KW_FN, TokenType.KW_STRUCT,
+                TokenType.RBRACE,
+            }:
+                return
+            self._advance()
+
+    def _synchronize_statement(self) -> None:
+        while not self._is_at_end():
+            if self._peek().type == TokenType.SEMICOLON:
+                self._advance()
+                return
+            if self._peek().type in {
+                TokenType.KW_IF, TokenType.KW_WHILE, TokenType.KW_FOR,
+                TokenType.KW_RETURN, TokenType.KW_FN, TokenType.KW_STRUCT,
+                TokenType.KW_INT, TokenType.KW_FLOAT, TokenType.KW_BOOL,  # Добавлено для лучшего восстановления
+                TokenType.RBRACE,
+            }:
+                return
+            self._advance()
+
+    def _synchronize_declaration(self) -> None:
+        while not self._is_at_end():
+            if self._peek().type in {TokenType.KW_FN, TokenType.KW_STRUCT}:
+                return
+            self._advance()

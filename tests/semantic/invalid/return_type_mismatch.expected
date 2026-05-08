@@ -1,0 +1,2 @@
+semantic error at return_type_mismatch.src:2:5: return type mismatch in 'foo': expected int, got float
+  note: function declared at 1:1

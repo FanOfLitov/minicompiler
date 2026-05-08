@@ -1,0 +1,5 @@
+fn test() -> void {
+    int x = 10;
+    float y = 3.14;
+    bool b = true;
+}

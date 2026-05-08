@@ -1,0 +1,2 @@
+semantic error at duplicate_variable_local.src:3:5: variable 'a' already declared in this scope
+  note: previously declared at 2:5

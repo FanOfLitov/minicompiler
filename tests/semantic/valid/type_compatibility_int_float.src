@@ -1,0 +1,4 @@
+fn foo() -> void {
+    int a = 5;
+    float b = a;   // int -> float разрешено
+}

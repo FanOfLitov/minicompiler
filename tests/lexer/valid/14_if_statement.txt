@@ -1,7 +1,7 @@
 1:1 KW_IF "if"
 1:4 LPAREN "("
 1:5 IDENTIFIER "x"
-1:7 EQ "=="
+1:7 EQ_EQ "=="
 1:10 INT_LITERAL "10" 10
 1:12 RPAREN ")"
 1:14 LBRACE "{"
@@ -17,4 +17,4 @@
 4:9 INT_LITERAL "30" 30
 4:11 SEMICOLON ";"
 5:1 RBRACE "}"
-5:2 END_OF_FILE ""
+5:2 EOF ""

@@ -1,342 +1,456 @@
-from src.parser.ast import *
-from .symbol_table import SymbolTable, SymbolInfo, SymbolKind
-from .type_system import PrimitiveType, StructType, FunctionType, Type
-from .errors import SemanticError
+"""
+Semantic analyser: traverses the AST, populates the symbol table,
+performs type checking, and decorates expression nodes with their types.
+"""
+from __future__ import annotations
 
-class SemanticAnalyzer:
-    def __init__(self):
-        self.sym_table = SymbolTable()
-        self.errors = []
-        self.current_function = None   # SymbolInfo текущей функции
-        self.in_loop = False           # для break/continue (если будут)
+from typing import Optional, Dict, List
+from src.parser.ast_nodes import (
+    ASTVisitor, ASTNode,
+    ProgramNode, FunctionDeclNode, StructDeclNode, ParamNode,
+    BlockStmtNode, VarDeclStmtNode, ExprStmtNode,
+    IfStmtNode, WhileStmtNode, ForStmtNode, ReturnStmtNode,
+    LiteralExprNode, IdentifierExprNode, BinaryExprNode,
+    UnaryExprNode, CallExprNode, AssignmentExprNode,
+)
+from .symbol_table import SymbolTable, Symbol, SymbolKind
+from .type_system import (
+    Type, INT, FLOAT, BOOL, STRING, VOID, NULL,
+    IntType, FloatType, BoolType, VoidType, StructType, FunctionType,
+    BUILTIN_TYPES, resolve_type,
+    binary_result_type, unary_result_type,
+)
+from .errors import ErrorReporter
 
-    def analyze(self, program: ProgramNode):
-        # Проход 1: регистрация глобальных объявлений (функции, структуры)
-        self._register_declarations(program)
-        # Проход 2: проверка тел функций и глобальных переменных
-        self._check_bodies(program)
-        return self.errors
 
-    def _register_declarations(self, node: ASTNode):
-        if isinstance(node, ProgramNode):
-            for decl in node.declarations:
-                self._register_declarations(decl)
-        elif isinstance(node, FunctionDeclNode):
-            # Создаём тип функции
-            param_types = [self._type_from_str(p.param_type) for p in node.parameters]
-            ret_type = self._type_from_str(node.return_type)
-            func_type = FunctionType(param_types, ret_type)
-            # Проверка дубликата
-            existing = self.sym_table.lookup(node.name)
-            if existing:
-                self._error(f"Duplicate function '{node.name}'", node.line, node.column, 'duplicate')
-                return
-            # Создаём символ функции
-            func_sym = SymbolInfo(
-                name=node.name,
-                kind=SymbolKind.FUNCTION,
-                type=func_type,
-                line=node.line,
-                column=node.column,
-                parameters=[]  # заполним позже
-            )
-            self.sym_table.insert(func_sym)
-            node.symbol = func_sym
-            # Запоминаем параметры (пока без типов, только имена)
-            # Реальные параметры будут добавлены при входе в тело
-        elif isinstance(node, StructDeclNode):
-            # Регистрация структуры
-            existing = self.sym_table.lookup(node.name)
-            if existing:
-                self._error(f"Duplicate struct '{node.name}'", node.line, node.column, 'duplicate')
-                return
-            # Сначала вычислим поля
-            fields = {}
-            for field in node.fields:
-                field_type = self._type_from_str(field.var_type)
-                if field.name in fields:
-                    self._error(f"Duplicate field '{field.name}' in struct '{node.name}'",
-                                field.line, field.column, 'duplicate')
-                else:
-                    fields[field.name] = field_type
-            struct_type = StructType(node.name, fields)
-            struct_sym = SymbolInfo(
-                name=node.name,
-                kind=SymbolKind.STRUCT,
-                type=struct_type,
-                line=node.line,
-                column=node.column,
-                fields=fields
-            )
-            self.sym_table.insert(struct_sym)
-            node.symbol = struct_sym
-        elif isinstance(node, VarDeclStmtNode):
-            # Глобальная переменная
-            var_type = self._type_from_str(node.var_type)
-            existing = self.sym_table.lookup(node.name)
-            if existing:
-                self._error(f"Duplicate global variable '{node.name}'", node.line, node.column, 'duplicate')
-                return
-            var_sym = SymbolInfo(
-                name=node.name,
-                kind=SymbolKind.VARIABLE,
-                type=var_type,
-                line=node.line,
-                column=node.column
-            )
-            self.sym_table.insert(var_sym)
-            node.symbol = var_sym
-            # Если есть инициализатор, проверим позже во втором проходе
-        # Другие узлы не имеют объявлений на глобальном уровне
+class SemanticAnalyzer(ASTVisitor):
+    """
+    Single-pass semantic analyser implemented as an AST visitor.
 
-    def _check_bodies(self, node: ASTNode):
-        if isinstance(node, ProgramNode):
-            for decl in node.declarations:
-                self._check_bodies(decl)
-        elif isinstance(node, FunctionDeclNode):
-            # Вход в функцию: новая область видимости
-            self.sym_table.enter_scope(f"function {node.name}")
-            # Добавляем параметры как символы
-            param_syms = []
-            for param in node.parameters:
-                param_type = self._type_from_str(param.param_type)
-                param_sym = SymbolInfo(
-                    name=param.name,
-                    kind=SymbolKind.PARAMETER,
-                    type=param_type,
-                    line=param.line,
-                    column=param.column
+    After calling analyze():
+      - self.symbol_table  – fully populated
+      - self.errors        – list of SemanticError
+      - Every ExpressionNode.resolved_type is set to a type string
+        (or 'error' on failure).
+    """
+
+    def __init__(self, filename: str = "<unknown>",
+                 source: str = "") -> None:
+        self.symbol_table = SymbolTable()
+        self._reporter = ErrorReporter(filename, source)
+        self._struct_registry: Dict[str, StructType] = {}
+        self._current_function: Optional[FunctionDeclNode] = None
+        self._current_return_type: Optional[Type] = None
+        self._loop_depth: int = 0
+
+    # ── Public API ─────────────────────────────────────────────────────────
+
+    def analyze(self, ast: ProgramNode) -> bool:
+        """
+        Run semantic analysis.
+        Returns True if no errors were found.
+        """
+        ast.accept(self)
+        return not self._reporter.has_errors
+
+    @property
+    def errors(self):
+        return self._reporter.errors
+
+    @property
+    def has_errors(self) -> bool:
+        return self._reporter.has_errors
+
+    def format_errors(self) -> str:
+        return self._reporter.format_all()
+
+    def summary(self) -> str:
+        return self._reporter.summary()
+
+    # ── Helpers ────────────────────────────────────────────────────────────
+
+    def _err(self, msg: str, node: ASTNode, hint: str = "") -> None:
+        ctx = ""
+        if self._current_function:
+            ctx = f"in function '{self._current_function.name}'"
+        self._reporter.error(msg, node.line, node.column,
+                             context=ctx, hint=hint)
+
+    def _resolve_type(self, name: str, node: ASTNode) -> Type:
+        t = resolve_type(name, self._struct_registry)
+        if t is None:
+            self._err(f"unknown type '{name}'", node)
+            return VOID  # sentinel
+        return t
+
+    def _set_expr_type(self, node: ASTNode, t: Type) -> Type:
+        """Annotate an expression node with its resolved type."""
+        node.resolved_type = str(t)
+        return t
+
+    def _error_type(self, node: ASTNode) -> Type:
+        node.resolved_type = "error"
+        return VOID  # continue analysis with a safe sentinel
+
+    # ══════════════════════════════════════════════════════════════════════
+    #  Visitor implementations
+    # ══════════════════════════════════════════════════════════════════════
+
+    # ── Program ────────────────────────────────────────────────────────────
+
+    def visit_program(self, node: ProgramNode) -> None:
+        # Pass 1: register all struct types so functions can use them
+        for decl in node.declarations:
+            if isinstance(decl, StructDeclNode):
+                self._register_struct(decl)
+
+        # Pass 2: register all function signatures (forward references)
+        for decl in node.declarations:
+            if isinstance(decl, FunctionDeclNode):
+                self._register_function_signature(decl)
+
+        # Pass 3: fully analyse every declaration
+        for decl in node.declarations:
+            decl.accept(self)
+
+    # ── Declarations ───────────────────────────────────────────────────────
+
+    def _register_struct(self, node: StructDeclNode) -> None:
+        if node.name in self._struct_registry:
+            self._err(f"duplicate struct declaration '{node.name}'", node)
+            return
+        st = StructType(name=node.name)
+        self._struct_registry[node.name] = st
+        sym = Symbol(name=node.name, kind=SymbolKind.STRUCT,
+                     type=st, decl_line=node.line, decl_column=node.column)
+        self.symbol_table.define(sym)
+
+    def _register_function_signature(self, node: FunctionDeclNode) -> None:
+        param_types = [self._resolve_type(p.param_type, p)
+                       for p in node.params]
+        ret_type = self._resolve_type(node.return_type, node)
+        fn_type = FunctionType(param_types=param_types,
+                               return_type=ret_type)
+        sym = Symbol(name=node.name, kind=SymbolKind.FUNCTION,
+                     type=fn_type,
+                     decl_line=node.line, decl_column=node.column)
+        if not self.symbol_table.define(sym):
+            self._err(f"duplicate function declaration '{node.name}'", node)
+
+    def visit_struct_decl(self, node: StructDeclNode) -> None:
+        st = self._struct_registry.get(node.name)
+        if st is None:
+            return  # error already reported in pass 1
+
+        seen_fields: set[str] = set()
+        for field_node in node.fields:
+            if field_node.name in seen_fields:
+                self._err(
+                    f"duplicate field '{field_node.name}' "
+                    f"in struct '{node.name}'",
+                    field_node,
                 )
-                if not self.sym_table.insert(param_sym):
-                    self._error(f"Duplicate parameter '{param.name}'", param.line, param.column, 'duplicate')
-                param_syms.append(param_sym)
-                param.symbol = param_sym
-            # Сохраняем параметры в символе функции
-            node.symbol.parameters = param_syms
-            # Запоминаем текущую функцию
-            old_func = self.current_function
-            self.current_function = node.symbol
-            # Проверяем тело
-            self._check_bodies(node.body)
-            # Выход из функции
-            self.sym_table.exit_scope()
-            self.current_function = old_func
-        elif isinstance(node, BlockStmtNode):
-            self.sym_table.enter_scope("block")
-            for stmt in node.statements:
-                self._check_bodies(stmt)
-            self.sym_table.exit_scope()
-        elif isinstance(node, VarDeclStmtNode):
-            # Локальная переменная
-            var_type = self._type_from_str(node.var_type)
-            existing = self.sym_table.lookup_local(node.name)
-            if existing:
-                self._error(f"Duplicate variable '{node.name}' in same scope", node.line, node.column, 'duplicate')
-                return
-            var_sym = SymbolInfo(
-                name=node.name,
-                kind=SymbolKind.VARIABLE,
-                type=var_type,
-                line=node.line,
-                column=node.column
+            else:
+                seen_fields.add(field_node.name)
+                ftype = self._resolve_type(field_node.var_type, field_node)
+                st.fields[field_node.name] = ftype
+
+    def visit_function_decl(self, node: FunctionDeclNode) -> None:
+        fn_sym = self.symbol_table.lookup_global(node.name)
+        if fn_sym is None:
+            return  # fatal duplicate – skip body
+
+        ret_type = (fn_sym.type.return_type
+                    if isinstance(fn_sym.type, FunctionType) else VOID)
+
+        self._current_function = node
+        self._current_return_type = ret_type
+
+        self.symbol_table.enter_scope(f"fn:{node.name}")
+
+        # Define parameters
+        for param in node.params:
+            ptype = self._resolve_type(param.param_type, param)
+            sym = Symbol(name=param.name, kind=SymbolKind.PARAMETER,
+                         type=ptype,
+                         decl_line=param.line, decl_column=param.column,
+                         is_initialized=True)
+            if not self.symbol_table.define(sym):
+                self._err(f"duplicate parameter '{param.name}'", param)
+
+        # Analyse body
+        node.body.accept(self)
+
+        self.symbol_table.exit_scope()
+        self._current_function = None
+        self._current_return_type = None
+
+    def visit_param(self, node: ParamNode) -> None:
+        pass  # handled inside visit_function_decl
+
+    # ── Statements ─────────────────────────────────────────────────────────
+
+    def visit_block_stmt(self, node: BlockStmtNode) -> None:
+        self.symbol_table.enter_scope("block")
+        for stmt in node.statements:
+            stmt.accept(self)
+        self.symbol_table.exit_scope()
+
+    def visit_var_decl_stmt(self, node: VarDeclStmtNode) -> None:
+        vtype = self._resolve_type(node.var_type, node)
+
+        # Check for duplicate in current scope
+        existing = self.symbol_table.lookup_local(node.name)
+        if existing is not None:
+            self._err(
+                f"variable '{node.name}' already declared in this scope",
+                node,
+                hint=(f"previously declared at "
+                      f"{existing.decl_line}:{existing.decl_column}"),
             )
-            self.sym_table.insert(var_sym)
-            node.symbol = var_sym
-            if node.initializer:
-                init_type = self._check_expression(node.initializer)
-                if init_type and not var_type.is_convertible_to(init_type):
-                    self._error(f"Type mismatch: cannot assign {init_type} to {var_type}",
-                                node.initializer.line, node.initializer.column, 'type_mismatch')
-        elif isinstance(node, ExprStmtNode):
-            self._check_expression(node.expression)
-        elif isinstance(node, IfStmtNode):
-            cond_type = self._check_expression(node.condition)
-            if cond_type and not (isinstance(cond_type, PrimitiveType) and cond_type.name == 'bool'):
-                self._error(f"If condition must be bool, got {cond_type}",
-                            node.condition.line, node.condition.column, 'type_mismatch')
-            self._check_bodies(node.then_branch)
-            if node.else_branch:
-                self._check_bodies(node.else_branch)
-        elif isinstance(node, WhileStmtNode):
-            cond_type = self._check_expression(node.condition)
-            if cond_type and not (isinstance(cond_type, PrimitiveType) and cond_type.name == 'bool'):
-                self._error(f"While condition must be bool, got {cond_type}",
-                            node.condition.line, node.condition.column, 'type_mismatch')
-            old_loop = self.in_loop
-            self.in_loop = True
-            self._check_bodies(node.body)
-            self.in_loop = old_loop
-        elif isinstance(node, ForStmtNode):
-            # For: init может быть VarDeclStmtNode или ExprStmtNode
-            if node.init:
-                self._check_bodies(node.init)
-            if node.condition:
-                cond_type = self._check_expression(node.condition)
-                if cond_type and not (isinstance(cond_type, PrimitiveType) and cond_type.name == 'bool'):
-                    self._error(f"For condition must be bool, got {cond_type}",
-                                node.condition.line, node.condition.column, 'type_mismatch')
-            if node.update:
-                self._check_expression(node.update)
-            old_loop = self.in_loop
-            self.in_loop = True
-            self._check_bodies(node.body)
-            self.in_loop = old_loop
-        elif isinstance(node, ReturnStmtNode):
-            if self.current_function is None:
-                self._error("Return statement outside function", node.line, node.column, 'invalid')
-                return
-            ret_type = self.current_function.type.return_type
-            if node.value:
-                val_type = self._check_expression(node.value)
-                if val_type and not val_type.is_convertible_to(ret_type):
-                    self._error(f"Return type mismatch: expected {ret_type}, got {val_type}",
-                                node.value.line, node.value.column, 'type_mismatch')
-            else:
-                # Пустой return: допустим только для void
-                if not (isinstance(ret_type, PrimitiveType) and ret_type.name == 'void'):
-                    self._error(f"Non-void function must return a value",
-                                node.line, node.column, 'type_mismatch')
-        elif isinstance(node, AssignmentExprNode):
-            # Проверка присваивания
-            target_type = self._check_expression(node.target)
-            value_type = self._check_expression(node.value)
-            if target_type and value_type:
-                if not value_type.is_convertible_to(target_type):
-                    self._error(f"Cannot assign {value_type} to {target_type}",
-                                node.line, node.column, 'type_mismatch')
-            node.type = target_type   # тип выражения присваивания = тип левой части
-        # ... другие узлы
 
-    def _check_expression(self, expr: ExpressionNode) -> Optional[Type]:
-        if isinstance(expr, LiteralExprNode):
-            # Определяем тип литерала
-            if isinstance(expr.value, int):
-                expr.type = PrimitiveType('int')
-            elif isinstance(expr.value, float):
-                expr.type = PrimitiveType('float')
-            elif isinstance(expr.value, str):
-                expr.type = PrimitiveType('string')
-            elif isinstance(expr.value, bool):
-                expr.type = PrimitiveType('bool')
-            else:
-                expr.type = None
-            return expr.type
-        elif isinstance(expr, IdentifierExprNode):
-            sym = self.sym_table.lookup(expr.name)
-            if sym is None:
-                self._error(f"Undeclared variable '{expr.name}'", expr.line, expr.column, 'undeclared')
-                expr.type = None
-            else:
-                expr.type = sym.type
-                expr.symbol = sym
-            return expr.type
-        elif isinstance(expr, BinaryExprNode):
-            left_type = self._check_expression(expr.left)
-            right_type = self._check_expression(expr.right)
-            if left_type is None or right_type is None:
-                expr.type = None
-                return None
-            op = expr.op
-            # Правила для арифметики
-            if op in ('+', '-', '*', '/', '%'):
-                # int+int -> int, int+float -> float, float+float -> float
-                if isinstance(left_type, PrimitiveType) and isinstance(right_type, PrimitiveType):
-                    if left_type.name == 'int' and right_type.name == 'int':
-                        expr.type = PrimitiveType('int')
-                    else:
-                        expr.type = PrimitiveType('float')
-                else:
-                    self._error(f"Arithmetic operator {op} requires numeric types, got {left_type} and {right_type}",
-                                expr.line, expr.column, 'type_mismatch')
-                    expr.type = None
-            elif op in ('==', '!=', '<', '<=', '>', '>='):
-                # Сравнение: типы должны быть совместимы, результат bool
-                if left_type.is_convertible_to(right_type) or right_type.is_convertible_to(left_type):
-                    expr.type = PrimitiveType('bool')
-                else:
-                    self._error(f"Cannot compare {left_type} and {right_type} with {op}",
-                                expr.line, expr.column, 'type_mismatch')
-                    expr.type = None
-            elif op == '&&' or op == '||':
-                if (isinstance(left_type, PrimitiveType) and left_type.name == 'bool' and
-                    isinstance(right_type, PrimitiveType) and right_type.name == 'bool'):
-                    expr.type = PrimitiveType('bool')
-                else:
-                    self._error(f"Logical operator {op} requires bool, got {left_type} and {right_type}",
-                                expr.line, expr.column, 'type_mismatch')
-                    expr.type = None
-            else:
-                expr.type = None
-            return expr.type
-        elif isinstance(expr, UnaryExprNode):
-            operand_type = self._check_expression(expr.operand)
-            if operand_type is None:
-                expr.type = None
-                return None
-            if expr.op == '-':
-                if isinstance(operand_type, PrimitiveType) and operand_type.name in ('int', 'float'):
-                    expr.type = operand_type
-                else:
-                    self._error(f"Unary minus requires numeric type, got {operand_type}",
-                                expr.line, expr.column, 'type_mismatch')
-                    expr.type = None
-            elif expr.op == '!':
-                if isinstance(operand_type, PrimitiveType) and operand_type.name == 'bool':
-                    expr.type = PrimitiveType('bool')
-                else:
-                    self._error(f"Logical not requires bool, got {operand_type}",
-                                expr.line, expr.column, 'type_mismatch')
-                    expr.type = None
-            else:
-                expr.type = None
-            return expr.type
-        elif isinstance(expr, CallExprNode):
-            # Проверка вызова функции
-            callee_type = self._check_expression(expr.callee)
-            if callee_type is None:
-                expr.type = None
-                return None
-            if not isinstance(callee_type, FunctionType):
-                self._error(f"Can only call functions, got {callee_type}",
-                            expr.line, expr.column, 'type_mismatch')
-                expr.type = None
-                return None
-            # Проверка аргументов
-            arg_types = [self._check_expression(arg) for arg in expr.arguments]
-            expected_types = callee_type.param_types
-            if len(arg_types) != len(expected_types):
-                self._error(f"Function expects {len(expected_types)} arguments, got {len(arg_types)}",
-                            expr.line, expr.column, 'argument_count')
-                expr.type = callee_type.return_type
-                return expr.type
-            for i, (arg_t, exp_t) in enumerate(zip(arg_types, expected_types)):
-                if arg_t and not arg_t.is_convertible_to(exp_t):
-                    self._error(f"Argument {i+1} type mismatch: expected {exp_t}, got {arg_t}",
-                                expr.arguments[i].line, expr.arguments[i].column, 'argument_type')
-            expr.type = callee_type.return_type
-            return expr.type
-        # Добавить обработку AssignmentExprNode
-        elif isinstance(expr, AssignmentExprNode):
-            # Уже обработано в _check_bodies, но для целостности:
-            self._check_expression(expr.target)
-            self._check_expression(expr.value)
-            expr.type = expr.target.type if expr.target.type else None
-            return expr.type
-        else:
-            return None
+        initialized = False
+        if node.initializer is not None:
+            init_type = node.initializer.accept(self)
+            if init_type is not None and not vtype.is_assignable_from(init_type):
+                self._err(
+                    f"type mismatch in initializer of '{node.name}': "
+                    f"expected {vtype}, got {init_type}",
+                    node.initializer,
+                )
+            initialized = True
 
-    def _type_from_str(self, type_str: str) -> Type:
-        if type_str in ('int', 'float', 'bool', 'void', 'string'):
-            return PrimitiveType(type_str)
-        else:
-            # Возможно, это имя структуры (будет найдено при регистрации)
-            # Пока создадим заглушку, но лучше искать в таблице символов
-            sym = self.sym_table.lookup(type_str)
-            if sym and sym.kind == SymbolKind.STRUCT:
-                return sym.type
-            else:
-                # Если структура не объявлена, вернём примитив? Лучше ошибку позже
-                return PrimitiveType(type_str)  # временно
+        sym = Symbol(
+            name=node.name, kind=SymbolKind.VARIABLE,
+            type=vtype, decl_line=node.line, decl_column=node.column,
+            is_initialized=initialized,
+        )
+        self.symbol_table.define(sym)
+        node.resolved_type = str(vtype)
 
-    def _error(self, message: str, line: int, column: int, category: str):
-        self.errors.append(SemanticError(message, line, column, category))
+    def visit_expr_stmt(self, node: ExprStmtNode) -> None:
+        node.expression.accept(self)
+
+    def visit_if_stmt(self, node: IfStmtNode) -> None:
+        cond_type = node.condition.accept(self)
+        if cond_type is not None and not isinstance(cond_type, BoolType):
+            self._err(
+                f"condition in 'if' must be bool, got {cond_type}",
+                node.condition,
+            )
+        node.then_branch.accept(self)
+        if node.else_branch:
+            node.else_branch.accept(self)
+
+    def visit_while_stmt(self, node: WhileStmtNode) -> None:
+        cond_type = node.condition.accept(self)
+        if cond_type is not None and not isinstance(cond_type, BoolType):
+            self._err(
+                f"condition in 'while' must be bool, got {cond_type}",
+                node.condition,
+            )
+        self._loop_depth += 1
+        node.body.accept(self)
+        self._loop_depth -= 1
+
+    def visit_for_stmt(self, node: ForStmtNode) -> None:
+        self.symbol_table.enter_scope("for")
+        if node.init:
+            node.init.accept(self)
+        if node.condition:
+            cond_type = node.condition.accept(self)
+            if cond_type is not None and not isinstance(cond_type, BoolType):
+                self._err(
+                    f"condition in 'for' must be bool, got {cond_type}",
+                    node.condition,
+                )
+        if node.update:
+            node.update.accept(self)
+        self._loop_depth += 1
+        node.body.accept(self)
+        self._loop_depth -= 1
+        self.symbol_table.exit_scope()
+
+    def visit_return_stmt(self, node: ReturnStmtNode) -> None:
+        if self._current_return_type is None:
+            self._err("'return' statement outside of a function", node)
+            return
+
+        if node.value is None:
+            # bare return
+            if not isinstance(self._current_return_type, VoidType):
+                self._err(
+                    f"function '{self._current_function.name}' must return "
+                    f"{self._current_return_type}, not void",
+                    node,
+                )
+            return
+
+        ret_type = node.value.accept(self)
+        if ret_type is None:
+            return
+
+        expected = self._current_return_type
+        if not expected.is_assignable_from(ret_type):
+            self._err(
+                f"return type mismatch in '{self._current_function.name}': "
+                f"expected {expected}, got {ret_type}",
+                node,
+                hint=f"function declared at "
+                     f"{self._current_function.line}:"
+                     f"{self._current_function.column}",
+            )
+
+    # ── Expressions ────────────────────────────────────────────────────────
+
+    def visit_literal_expr(self, node: LiteralExprNode) -> Type:
+        mapping = {
+            'int': INT,
+            'float': FLOAT,
+            'bool': BOOL,
+            'string': STRING,
+            'null': NULL,
+        }
+        t = mapping.get(node.kind, VOID)
+        return self._set_expr_type(node, t)
+
+    def visit_identifier_expr(self, node: IdentifierExprNode) -> Type:
+        sym = self.symbol_table.lookup(node.name)
+        if sym is None:
+            # Try to suggest a similar name
+            candidates = [
+                s for s in self.symbol_table.current_scope.symbols
+                if abs(len(s) - len(node.name)) <= 2
+            ]
+            hint = ""
+            if candidates:
+                hint = f"did you mean '{candidates[0]}'?"
+            self._err(f"undeclared variable '{node.name}'", node, hint=hint)
+            return self._error_type(node)
+
+        if sym.kind == SymbolKind.VARIABLE and not sym.is_initialized:
+            # Warn only – allow analysis to continue
+            self._err(
+                f"variable '{node.name}' may be used before initialization",
+                node,
+            )
+
+        return self._set_expr_type(node, sym.type)
+
+    def visit_binary_expr(self, node: BinaryExprNode) -> Type:
+        left_type = node.left.accept(self)
+        right_type = node.right.accept(self)
+
+        if left_type is None or right_type is None:
+            return self._error_type(node)
+
+        result = binary_result_type(node.operator, left_type, right_type)
+        if result is None:
+            self._err(
+                f"operator '{node.operator}' cannot be applied to "
+                f"{left_type} and {right_type}",
+                node,
+            )
+            return self._error_type(node)
+
+        return self._set_expr_type(node, result)
+
+    def visit_unary_expr(self, node: UnaryExprNode) -> Type:
+        operand_type = node.operand.accept(self)
+        if operand_type is None:
+            return self._error_type(node)
+
+        result = unary_result_type(node.operator, operand_type)
+        if result is None:
+            self._err(
+                f"unary operator '{node.operator}' cannot be applied "
+                f"to {operand_type}",
+                node,
+            )
+            return self._error_type(node)
+
+        return self._set_expr_type(node, result)
+
+    def visit_call_expr(self, node: CallExprNode) -> Type:
+        sym = self.symbol_table.lookup(node.callee)
+        if sym is None:
+            self._err(f"call to undeclared function '{node.callee}'", node)
+            return self._error_type(node)
+
+        if not isinstance(sym.type, FunctionType):
+            self._err(
+                f"'{node.callee}' is not a function "
+                f"(declared as {sym.kind})",
+                node,
+            )
+            return self._error_type(node)
+
+        fn_type = sym.type
+
+        # Argument count
+        expected_n = len(fn_type.param_types)
+        actual_n = len(node.arguments)
+        if expected_n != actual_n:
+            self._err(
+                f"wrong number of arguments to '{node.callee}': "
+                f"expected {expected_n}, got {actual_n}",
+                node,
+                hint=f"function signature: {node.callee}{fn_type}",
+            )
+            # Still type-check as many args as we can
+
+        for i, arg in enumerate(node.arguments):
+            arg_type = arg.accept(self)
+            if i < expected_n and arg_type is not None:
+                expected_type = fn_type.param_types[i]
+                if not expected_type.is_assignable_from(arg_type):
+                    self._err(
+                        f"argument {i + 1} to '{node.callee}': "
+                        f"expected {expected_type}, got {arg_type}",
+                        arg,
+                    )
+
+        return self._set_expr_type(node, fn_type.return_type)
+
+    def visit_assignment_expr(self, node: AssignmentExprNode) -> Type:
+        sym = self.symbol_table.lookup(node.target)
+        if sym is None:
+            self._err(f"assignment to undeclared variable '{node.target}'",
+                      node)
+            node.value.accept(self)  # still check RHS
+            return self._error_type(node)
+
+        if sym.kind not in {SymbolKind.VARIABLE, SymbolKind.PARAMETER}:
+            self._err(
+                f"'{node.target}' is not assignable "
+                f"(it is a {sym.kind})",
+                node,
+            )
+
+        rhs_type = node.value.accept(self)
+
+        if rhs_type is not None:
+            # Compound assignment operators need operand type check
+            if node.operator != '=':
+                bare_op = node.operator[0]  # '+=' → '+'
+                result = binary_result_type(bare_op, sym.type, rhs_type)
+                if result is None:
+                    self._err(
+                        f"operator '{node.operator}' cannot be applied to "
+                        f"{sym.type} and {rhs_type}",
+                        node,
+                    )
+                    return self._error_type(node)
+                rhs_type = result
+
+            if not sym.type.is_assignable_from(rhs_type):
+                self._err(
+                    f"type mismatch: cannot assign {rhs_type} "
+                    f"to variable '{node.target}' of type {sym.type}",
+                    node,
+                )
+                return self._error_type(node)
+
+        # Mark variable as initialized
+        sym.is_initialized = True
+        return self._set_expr_type(node, sym.type)

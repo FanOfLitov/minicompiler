@@ -1,183 +1,332 @@
-import re
-from .token import Token, TokenType
-from typing import Any, List
+
+from __future__ import annotations
+
+from typing import List, Optional, Union, Dict, Set, Tuple
+from .token_types import Token, TokenType, KEYWORDS
+
+MAX_IDENTIFIER_LENGTH = 255
+INT_MIN = -(2 ** 31)
+INT_MAX = 2 ** 31 - 1
+
+
+class LexerError:
+    def __init__(self, message: str, line: int, column: int) -> None:
+        self.message = message
+        self.line    = line
+        self.column  = column
+
+    def __str__(self) -> str:
+        return f"lexer error at {self.line}:{self.column}: {self.message}"
+
 
 class Scanner:
-    def __init__(self, source: str):
-        self.source = source
-        self.tokens: list[Token] = []
-        self.start = 0
-        self.current = 0
-        self.line = 1
-        self.column = 1
-        self.start_column = 1
+    def __init__(self, source: str, filename: str = "<unknown>") -> None:
+        self._source:   str          = source
+        self._filename: str          = filename
+        self._tokens:   List[Token]  = []
+        self.errors:    List[LexerError] = []
 
-        self.keywords = {
-            'if': TokenType.KW_IF,
-            'else': TokenType.KW_ELSE,
-            'while': TokenType.KW_WHILE,
-            'for': TokenType.KW_FOR,
-            'int': TokenType.KW_INT,
-            'float': TokenType.KW_FLOAT,
-            'bool': TokenType.KW_BOOL,
-            'return': TokenType.KW_RETURN,
-            'true': TokenType.KW_TRUE,
-            'false': TokenType.KW_FALSE,
-            'void': TokenType.KW_VOID,
-            'struct': TokenType.KW_STRUCT,
-            'fn': TokenType.KW_FN,
-        }
+        self._start:    int = 0
+        self._current:  int = 0
+        self._line:     int = 1
+        self._col_start: int = 1
+        self._col:      int = 1
 
-    def is_at_end(self) -> bool:
-        return self.current >= len(self.source)
+    def scan_all(self) -> List[Token]:
+        while not self._is_at_end():
+            self._start      = self._current
+            self._col_start  = self._col
+            self._scan_token()
 
-    def advance(self) -> str:
-        char = self.source[self.current]
-        self.current += 1
-        self.column += 1
-        return char
+        self._tokens.append(
+            Token(TokenType.EOF, "", self._line, self._col)
+        )
+        return self._tokens
 
-    def peek(self) -> str:
-        return '\0' if self.is_at_end() else self.source[self.current]
+    def _scan_token(self) -> None:
+        c = self._advance()
 
-    def peek_next(self) -> str:
-        if self.current + 1 >= len(self.source):
+        if c in (' ', '\t', '\r'):
+            return
+        if c == '\n':
+            return
+
+        if c == '(':
+            self._add_token(TokenType.LPAREN)
+        elif c == ')':
+            self._add_token(TokenType.RPAREN)
+        elif c == '{':
+            self._add_token(TokenType.LBRACE)
+        elif c == '}':
+            self._add_token(TokenType.RBRACE)
+        elif c == '[':
+            self._add_token(TokenType.LBRACKET)
+        elif c == ']':
+            self._add_token(TokenType.RBRACKET)
+        elif c == ';':
+            self._add_token(TokenType.SEMICOLON)
+        elif c == ',':
+            self._add_token(TokenType.COMMA)
+        elif c == ':':
+            self._add_token(TokenType.COLON)
+        elif c == '%':
+            self._add_token(TokenType.PERCENT)
+        elif c == '*':
+            self._add_token(TokenType.STAR_ASSIGN if self._match('=') else TokenType.STAR)
+        elif c == '+':
+            self._add_token(TokenType.PLUS_ASSIGN if self._match('=') else TokenType.PLUS)
+        elif c == '!':
+            self._add_token(TokenType.BANG_EQ if self._match('=') else TokenType.BANG)
+        elif c == '=':
+            self._add_token(TokenType.EQ_EQ if self._match('=') else TokenType.ASSIGN)
+        elif c == '<':
+            self._add_token(TokenType.LT_EQ if self._match('=') else TokenType.LT)
+        elif c == '>':
+            self._add_token(TokenType.GT_EQ if self._match('=') else TokenType.GT)
+        elif c == '&':
+            if self._match('&'):
+                self._add_token(TokenType.AMP_AMP)
+            else:
+                self._error("unexpected character '&'; did you mean '&&'?")
+        elif c == '|':
+            if self._match('|'):
+                self._add_token(TokenType.PIPE_PIPE)
+            else:
+                self._error("unexpected character '|'; did you mean '||'?")
+        elif c == '-':
+            if self._match('>'):
+                self._add_token(TokenType.ARROW)
+            elif self._match('='):
+                self._add_token(TokenType.MINUS_ASSIGN)
+            else:
+                self._add_token(TokenType.MINUS)
+        elif c == '/':
+            if self._match('/'):
+                self._skip_line_comment()
+            elif self._match('*'):
+                self._skip_block_comment()
+            elif self._match('='):
+                self._add_token(TokenType.SLASH_ASSIGN)
+            else:
+                self._add_token(TokenType.SLASH)
+        elif c == '"':
+            self._scan_string()
+        elif c == '.':
+            # Поддержка чисел, начинающихся с точки, например .5
+            if self._peek().isdigit():
+                self._scan_float_starting_with_dot()
+            else:
+                self._error("unexpected character '.'")
+        else:
+            if c.isdigit():
+                self._scan_number(c)
+            elif c.isalpha() or c == '_':
+                self._scan_identifier()
+            else:
+                self._error(f"unexpected character {c!r}")
+
+    def _skip_line_comment(self) -> None:
+        while not self._is_at_end() and self._peek() != '\n':
+            self._advance()
+
+    def _skip_block_comment(self) -> None:
+        start_line = self._line
+        start_col  = self._col_start
+        depth = 1
+
+        while not self._is_at_end() and depth > 0:
+            c = self._advance()
+            if c == '/' and self._peek() == '*':
+                self._advance()
+                depth += 1
+            elif c == '*' and self._peek() == '/':
+                self._advance()
+                depth -= 1
+
+        if depth > 0:
+            self._errors_at(
+                start_line, start_col,
+                "unterminated block comment (/* ... */ not closed)"
+            )
+
+    def _scan_string(self) -> None:
+        start_line = self._line
+        start_col  = self._col_start
+        chars: List[str] = []
+
+        while not self._is_at_end() and self._peek() != '"':
+            c = self._advance()
+            if c == '\n':
+                self._errors_at(
+                    start_line, start_col,
+                    "unterminated string literal (newline before closing '\"')"
+                )
+                return
+            if c == '\\':
+                escape = self._advance() if not self._is_at_end() else ''
+                if escape == 'n':
+                    chars.append('\n')
+                elif escape == 't':
+                    chars.append('\t')
+                elif escape == 'r':
+                    chars.append('\r')
+                elif escape == '\\':
+                    chars.append('\\')
+                elif escape == '"':
+                    chars.append('"')
+                elif escape == '0':
+                    chars.append('\0')
+                else:
+                    self._error(f"unknown escape sequence '\\{escape}'")
+                    chars.append(escape)
+            else:
+                chars.append(c)
+
+        if self._is_at_end():
+            self._errors_at(
+                start_line, start_col,
+                "unterminated string literal (reached end of file)"
+            )
+            return
+
+        self._advance()
+        value = ''.join(chars)
+        lexeme = self._source[self._start:self._current]
+        self._tokens.append(
+            Token(TokenType.STRING_LITERAL, lexeme,
+                  start_line, start_col, value)
+        )
+
+    def _scan_number(self, first: str) -> None:
+        while not self._is_at_end() and self._peek().isdigit():
+            self._advance()
+
+        is_float = False
+        if (not self._is_at_end() and self._peek() == '.'
+                and self._peek_next().isdigit()):
+            is_float = True
+            self._advance()
+            while not self._is_at_end() and self._peek().isdigit():
+                self._advance()
+
+        lexeme = self._source[self._start:self._current]
+
+        # Ошибка: идентификатор начинается с цифры (например, 1abc)
+        if not self._is_at_end() and (self._peek().isalpha() or self._peek() == '_'):
+            while not self._is_at_end() and (self._peek().isalnum() or self._peek() == '_'):
+                self._advance()
+            full_lexeme = self._source[self._start:self._current]
+            self._errors_at(self._line, self._col_start, f"invalid identifier starting with digit: '{full_lexeme}'")
+            return
+
+        if is_float:
+            value = float(lexeme)
+            self._tokens.append(
+                Token(TokenType.FLOAT_LITERAL, lexeme,
+                      self._line, self._col_start, value)
+            )
+        else:
+            value = int(lexeme)
+            if not (INT_MIN <= value <= INT_MAX):
+                self._error(
+                    f"integer literal {value} is out of range "
+                    f"[{INT_MIN}, {INT_MAX}]"
+                )
+            self._tokens.append(
+                Token(TokenType.INT_LITERAL, lexeme,
+                      self._line, self._col_start, value)
+            )
+
+    def _scan_float_starting_with_dot(self) -> None:
+        # Разбор чисел типа .5
+        while not self._is_at_end() and self._peek().isdigit():
+            self._advance()
+        lexeme = self._source[self._start:self._current]
+        self._tokens.append(
+            Token(TokenType.FLOAT_LITERAL, lexeme,
+                  self._line, self._col_start, float(lexeme))
+        )
+
+    def _scan_identifier(self) -> None:
+        while not self._is_at_end() and (
+            self._peek().isalnum() or self._peek() == '_'
+        ):
+            self._advance()
+
+        lexeme = self._source[self._start:self._current]
+
+        if len(lexeme) > MAX_IDENTIFIER_LENGTH:
+            self._error(
+                f"identifier '{lexeme[:20]}...' exceeds maximum length "
+                f"of {MAX_IDENTIFIER_LENGTH} characters"
+            )
+
+        ttype = KEYWORDS.get(lexeme)
+        if ttype is not None:
+            if ttype == TokenType.KW_TRUE:
+                self._tokens.append(
+                    Token(TokenType.BOOL_LITERAL, lexeme,
+                          self._line, self._col_start, True)
+                )
+            elif ttype == TokenType.KW_FALSE:
+                self._tokens.append(
+                    Token(TokenType.BOOL_LITERAL, lexeme,
+                          self._line, self._col_start, False)
+                )
+            else:
+                self._tokens.append(
+                    Token(ttype, lexeme, self._line, self._col_start)
+                )
+        else:
+            self._tokens.append(
+                Token(TokenType.IDENTIFIER, lexeme,
+                      self._line, self._col_start)
+            )
+
+    def _is_at_end(self) -> bool:
+        return self._current >= len(self._source)
+
+    def _advance(self) -> str:
+        ch = self._source[self._current]
+        self._current += 1
+
+        if ch == '\n':
+            self._line += 1
+            self._col = 1
+        else:
+            self._col += 1
+
+        return ch
+
+    def _peek(self) -> str:
+        if self._is_at_end():
             return '\0'
-        return self.source[self.current + 1]
+        return self._source[self._current]
 
-    def match(self, expected: str) -> bool:
-        if self.is_at_end() or self.source[self.current] != expected:
+    def _peek_next(self) -> str:
+        if self._current + 1 >= len(self._source):
+            return '\0'
+        return self._source[self._current + 1]
+
+    def _match(self, expected: str) -> bool:
+        if self._is_at_end() or self._source[self._current] != expected:
             return False
-        self.current += 1
-        self.column += 1
+        self._advance()
         return True
 
-    def add_token(self, token_type: TokenType, literal: Any = None):
-        lexeme = self.source[self.start:self.current]
-        self.tokens.append(Token(token_type, lexeme, self.line, self.start_column, literal))
+    def _add_token(self, ttype: TokenType,
+                   literal: object = None) -> None:
+        lexeme = self._source[self._start:self._current]
+        self._tokens.append(
+            Token(ttype, lexeme, self._line, self._col_start, literal)
+        )
 
-    def scan_tokens(self) -> list[Token]:
-        while not self.is_at_end():
-            self.start = self.current
-            self.start_column = self.column
-            self.scan_token()
+    def _error(self, message: str) -> None:
+        self._errors_at(self._line, self._col_start, message)
 
-        self.tokens.append(Token(TokenType.END_OF_FILE, "", self.line, self.column))
-        return self.tokens
-
-    def scan_token(self):
-        char = self.advance()
-
-        # Пробелы
-        if char in ' \t\r':
-            return
-        if char == '\n':
-            self.line += 1
-            self.column = 1
-            return
-
-        # Комментарии
-        if char == '/':
-            if self.match('/'):
-                while self.peek() != '\n' and not self.is_at_end():
-                    self.advance()
-                return
-            if self.match('*'):
-                self.block_comment()
-                return
-            if self.match('='):
-                self.add_token(TokenType.SLASH_ASSIGN)
-                return
-            self.add_token(TokenType.SLASH)
-            return
-
-        # Операторы
-        if char == '+': self.add_token(TokenType.PLUS_ASSIGN if self.match('=') else TokenType.PLUS)
-        elif char == '-': self.add_token(TokenType.MINUS_ASSIGN if self.match('=') else TokenType.MINUS)
-        elif char == '*': self.add_token(TokenType.STAR_ASSIGN if self.match('=') else TokenType.STAR)
-        elif char == '%': self.add_token(TokenType.PERCENT)
-        elif char == '=': self.add_token(TokenType.EQ if self.match('=') else TokenType.ASSIGN)
-        elif char == '!': self.add_token(TokenType.NE if self.match('=') else TokenType.NOT)
-        elif char == '<': self.add_token(TokenType.LE if self.match('=') else TokenType.LT)
-        elif char == '>': self.add_token(TokenType.GE if self.match('=') else TokenType.GT)
-        elif char == '&': self.add_token(TokenType.AND) if self.match('&') else self.error("Unexpected '&'")
-        elif char == '|': self.add_token(TokenType.OR) if self.match('|') else self.error("Unexpected '|'")
-
-        # Делимитеры
-        elif char == '(': self.add_token(TokenType.LPAREN)
-        elif char == ')': self.add_token(TokenType.RPAREN)
-        elif char == '{': self.add_token(TokenType.LBRACE)
-        elif char == '}': self.add_token(TokenType.RBRACE)
-        elif char == '[': self.add_token(TokenType.LBRACKET)
-        elif char == ']': self.add_token(TokenType.RBRACKET)
-        elif char == ';': self.add_token(TokenType.SEMICOLON)
-        elif char == ',': self.add_token(TokenType.COMMA)
-        elif char == ':': self.add_token(TokenType.COLON)
-        elif char == '.': self.add_token(TokenType.DOT)
-
-        # Строки
-        elif char == '"':
-            self.string()
-
-        # Числа
-        elif char.isdigit():
-            self.number()
-
-        # Идентификаторы / ключевые слова
-        elif char.isalpha() or char == '_':
-            self.identifier()
-
-        else:
-            self.error(f"Unexpected character: '{char}'")
-
-    def block_comment(self):
-        while not self.is_at_end():
-            if self.peek() == '*' and self.peek_next() == '/':
-                self.advance()  # *
-                self.advance()  # /
-                return
-            if self.peek() == '\n':
-                self.line += 1
-                self.column = 1
-            self.advance()
-        self.error("Unterminated block comment")
-
-    def string(self):
-        while self.peek() != '"' and not self.is_at_end():
-            if self.peek() == '\n':
-                self.line += 1
-                self.column = 1
-            self.advance()
-
-        if self.is_at_end():
-            self.error("Unterminated string")
-            return
-
-        self.advance()  # закрывающая "
-        literal = self.source[self.start + 1:self.current - 1]
-        self.add_token(TokenType.STRING_LITERAL, literal)
-
-    def number(self):
-        while self.peek().isdigit():
-            self.advance()
-
-        if self.peek() == '.' and self.peek_next().isdigit():
-            self.advance()  # .
-            while self.peek().isdigit():
-                self.advance()
-            literal = float(self.source[self.start:self.current])
-            self.add_token(TokenType.FLOAT_LITERAL, literal)
-        else:
-            literal = int(self.source[self.start:self.current])
-            self.add_token(TokenType.INT_LITERAL, literal)
-
-    def identifier(self):
-        while self.peek().isalnum() or self.peek() == '_':
-            self.advance()
-        text = self.source[self.start:self.current]
-        token_type = self.keywords.get(text, TokenType.IDENTIFIER)
-        self.add_token(token_type)
-
-    def error(self, message: str):
-        print(f"Error at line {self.line}, column {self.column}: {message}")
-        self.add_token(TokenType.ERROR, message)
+    def _errors_at(self, line: int, col: int, message: str) -> None:
+        self.errors.append(LexerError(message, line, col))
+        lexeme = self._source[self._start:self._current]
+        self._tokens.append(
+            Token(TokenType.ERROR, lexeme, line, col)
+        )
