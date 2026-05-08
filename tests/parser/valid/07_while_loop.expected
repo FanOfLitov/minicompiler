@@ -1,0 +1,8 @@
+Program [1:1]
+  FunctionDecl: test() -> void [1:1]
+    Block [1:11]
+      While [2:5]
+        Condition:
+          Literal(bool): False [2:12]
+        Body:
+          Block [2:19]

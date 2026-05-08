@@ -1,0 +1,7 @@
+fn foo(int a, int b) {
+}
+
+fn test() {
+    foo(1, 2);
+    foo(1 + 2, 3);
+}

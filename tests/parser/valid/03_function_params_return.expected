@@ -1,0 +1,5 @@
+Program [1:1]
+  FunctionDecl: add(int a, float b) -> float [1:1]
+    Block [1:33]
+      Return [2:5]
+        Identifier: b [2:12]

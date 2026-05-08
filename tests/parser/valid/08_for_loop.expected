@@ -1,0 +1,16 @@
+Program [1:1]
+  FunctionDecl: test() -> void [1:1]
+    Block [1:11]
+      For [2:5]
+        Init:
+          VarDecl: int i = <expr> [2:10]
+            Literal(int): 0 [2:18]
+        Condition:
+          Binary: '<' [2:23]
+            Identifier: i [2:21]
+            Literal(int): 5 [2:25]
+        Update:
+          Assignment: i += [2:30]
+            Literal(int): 1 [2:33]
+        Body:
+          Block [2:36]

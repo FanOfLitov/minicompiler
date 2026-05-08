@@ -1,0 +1,8 @@
+Program [1:1]
+  FunctionDecl: id(int x) -> int [1:1]
+    Block [1:21]
+      Return [2:5]
+        Identifier: x [2:12]
+  FunctionDecl: noop() -> void [5:1]
+    Block [5:11]
+      Return [6:5]

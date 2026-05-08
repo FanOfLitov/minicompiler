@@ -1,0 +1,7 @@
+fn id(int x) -> int {
+    return x;
+}
+
+fn noop() {
+    return;
+}

@@ -1,0 +1,4 @@
+fn test() {
+    bool x = !false;
+    int y = -1;
+}

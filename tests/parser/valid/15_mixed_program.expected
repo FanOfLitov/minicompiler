@@ -1,0 +1,47 @@
+Program [1:1]
+  StructDecl: Pair [1:1]
+    VarDecl: int left [2:5]
+    VarDecl: int right [3:5]
+  FunctionDecl: sum(int a, int b) -> int [6:1]
+    Block [6:29]
+      VarDecl: int result = <expr> [7:5]
+        Binary: '+' [7:20]
+          Identifier: a [7:18]
+          Identifier: b [7:22]
+      Return [8:5]
+        Identifier: result [8:12]
+  FunctionDecl: main() -> void [11:1]
+    Block [11:11]
+      For [12:5]
+        Init:
+          VarDecl: int i = <expr> [12:10]
+            Literal(int): 0 [12:18]
+        Condition:
+          Binary: '<' [12:23]
+            Identifier: i [12:21]
+            Literal(int): 3 [12:25]
+        Update:
+          Assignment: i += [12:30]
+            Literal(int): 1 [12:33]
+        Body:
+          Block [12:36]
+            If [13:9]
+              Condition:
+                Binary: '<' [13:15]
+                  Identifier: i [13:13]
+                  Literal(int): 2 [13:17]
+              Then:
+                Block [13:20]
+                  ExprStmt [14:13]
+                    Call: sum() [14:13]
+                      Identifier: i [14:17]
+                      Binary: '+' [14:22]
+                        Identifier: i [14:20]
+                        Literal(int): 1 [14:24]
+              Else:
+                Block [15:16]
+                  While [16:13]
+                    Condition:
+                      Literal(bool): False [16:20]
+                    Body:
+                      Block [16:27]

@@ -1,0 +1,4 @@
+Program [1:1]
+  StructDecl: Vector [1:1]
+    VarDecl: int x [2:5]
+    VarDecl: int y [3:5]

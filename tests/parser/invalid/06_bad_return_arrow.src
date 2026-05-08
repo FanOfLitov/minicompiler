@@ -1,0 +1,3 @@
+fn add(int a) float {
+    return a;
+}
