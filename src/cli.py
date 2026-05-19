@@ -1,205 +1,155 @@
 # src/cli.py
+from __future__ import annotations
+
+import argparse
 import sys
+from pathlib import Path
 
-def main():
-    if len(sys.argv) < 2:
-        print("Usage: python -m src.cli {lex|parse} ...")
-        print("  For help: python -m src.cli --help")
-        sys.exit(1)
 
-    command = sys.argv[1]
+def _read_source(path: str) -> str:
+    return Path(path).read_text(encoding="utf-8")
 
-    if command == 'lex':
-        lex_command()
-    elif command == 'parse':
-        parse_command()
-    elif command in ('--help', '-h'):
-        show_help()
-    elif command == 'semantic':
-        semantic_command()
-    else:
-        print(f"Unknown command: {command}")
-        show_help()
-        sys.exit(1)
 
-def show_help():
-    print("MiniCompiler - Command Line Interface")
-    print()
-    print("Commands:")
-    print("  lex --input FILE [--output FILE]")
-    print("      Tokenize source file and print tokens.")
-    print()
-    print("  parse --input FILE [--output FILE] [--format {text|dot|json}]")
-    print("      Parse source file and output AST in specified format (default: text).")
-    print()
-    print("Options:")
-    print("  --help, -h      Show this help message.")
-
-def lex_command():
-    input_file = None
-    output_file = None
-    i = 2
-    while i < len(sys.argv):
-        arg = sys.argv[i]
-        if arg == '--input' and i+1 < len(sys.argv):
-            input_file = sys.argv[i+1]
-            i += 2
-        elif arg == '--output' and i+1 < len(sys.argv):
-            output_file = sys.argv[i+1]
-            i += 2
-        else:
-            print(f"Unknown argument for lex: {arg}")
-            sys.exit(1)
-
-    if not input_file:
-        print("Error: No input file specified. Use --input <file>")
-        sys.exit(1)
-
-    try:
-        with open(input_file, 'r', encoding='utf-8') as f:
-            source = f.read()
-    except Exception as e:
-        print(f"Error reading file: {e}")
-        sys.exit(1)
-
-    from src.lexer.scanner import Scanner
-    scanner = Scanner(source)
-    tokens = scanner.scan_tokens()
-
-    output_lines = [str(token) for token in tokens]
-    output_text = '\n'.join(output_lines)
-
+def _write_or_print(text: str, output_file: str | None) -> None:
     if output_file:
-        try:
-            with open(output_file, 'w', encoding='utf-8') as f:
-                f.write(output_text + '\n')
-            print(f"Tokens written to {output_file}")
-        except Exception as e:
-            print(f"Error writing output: {e}")
-            sys.exit(1)
+        Path(output_file).write_text(text + ("" if text.endswith("\n") else "\n"), encoding="utf-8")
     else:
-        print(output_text)
+        print(text)
 
-def parse_command():
-    input_file = None
-    output_file = None
-    format = 'text'
-    i = 2
-    while i < len(sys.argv):
-        arg = sys.argv[i]
-        if arg == '--input' and i+1 < len(sys.argv):
-            input_file = sys.argv[i+1]
-            i += 2
-        elif arg == '--output' and i+1 < len(sys.argv):
-            output_file = sys.argv[i+1]
-            i += 2
-        elif arg == '--format' and i+1 < len(sys.argv):
-            format = sys.argv[i+1].lower()
-            i += 2
-        else:
-            print(f"Unknown argument for parse: {arg}")
-            sys.exit(1)
 
-    if not input_file:
-        print("Error: No input file specified. Use --input <file>")
-        sys.exit(1)
-
-    if format not in ('text', 'dot', 'json'):
-        print(f"Error: Unknown format '{format}'. Supported formats: text, dot, json")
-        sys.exit(1)
-
-    try:
-        with open(input_file, 'r', encoding='utf-8') as f:
-            source = f.read()
-    except Exception as e:
-        print(f"Error reading file: {e}")
-        sys.exit(1)
-
+def _scan_source(source: str, filename: str):
     from src.lexer.scanner import Scanner
-    scanner = Scanner(source)
-    tokens = scanner.scan_tokens()
 
-    if any(token.type.name == 'ERROR' for token in tokens):
-        print("Lexical errors found. Cannot parse.")
-        sys.exit(1)
+    scanner = Scanner(source, filename=filename)
+    tokens = scanner.scan_tokens() if hasattr(scanner, "scan_tokens") else scanner.scan_all()
+    return scanner, tokens
 
+
+def _parse_source(source: str, filename: str):
     from src.parser.parser import Parser
-    parser = Parser(tokens)
-    try:
-        ast = parser.parse()
-    except Exception as e:
-        print(f"Parse error: {e}")
-        sys.exit(1)
 
-    if output_file:
-        out = open(output_file, 'w', encoding='utf-8')
-    else:
-        out = sys.stdout
+    scanner, tokens = _scan_source(source, filename)
+    if scanner.errors:
+        raise SystemExit("Lexical errors found:\n" + "\n".join(str(e) for e in scanner.errors))
 
-    if format == 'text':
-        from src.parser.ast_printer import ASTPrinter
-        printer = ASTPrinter()
-        printer.print_text(ast, out)
-    elif format == 'dot':
-        from src.parser.ast_printer import ASTDotPrinter
-        printer = ASTDotPrinter()
-        printer.print_dot(ast, out)
-    elif format == 'json':
-        print("JSON output not implemented yet.", file=sys.stderr)
-        sys.exit(1)
-
-    if output_file:
-        out.close()
-        print(f"AST written to {output_file}")
-
-def semantic_command():
-    # аргументы: --input, --output (опционально), --symbols (опционально)
-    input_file = None
-    output_file = None
-    show_symbols = False
-    i = 2
-    while i < len(sys.argv):
-        arg = sys.argv[i]
-        if arg == '--input' and i+1 < len(sys.argv):
-            input_file = sys.argv[i+1]; i+=2
-        elif arg == '--output' and i+1 < len(sys.argv):
-            output_file = sys.argv[i+1]; i+=2
-        elif arg == '--symbols':
-            show_symbols = True; i+=1
-        else:
-            i+=1
-    if not input_file:
-        print("Error: --input required")
-        sys.exit(1)
-    # читаем файл, лексируем, парсим
-    from src.lexer.scanner import Scanner
-    from src.parser.parser import Parser
-    from src.semantic.analyzer import SemanticAnalyzer
-    from src.parser.ast_printer import ASTPrinter
-
-    with open(input_file, 'r', encoding='utf-8') as f:
-        source = f.read()
-    scanner = Scanner(source)
-    tokens = scanner.scan_tokens()
     parser = Parser(tokens)
     ast = parser.parse()
-    analyzer = SemanticAnalyzer()
-    errors = analyzer.analyze(ast)
+    if parser.errors:
+        raise SystemExit("Parse errors found:\n" + "\n".join(str(e) for e in parser.errors))
+    if ast is None:
+        raise SystemExit("Parse failed: parser returned None")
+    return ast
 
-    out = open(output_file, 'w', encoding='utf-8') if output_file else sys.stdout
-    if show_symbols:
-        out.write(analyzer.sym_table.dump() + "\n")
-    if errors:
-        out.write("Semantic errors:\n")
-        for err in errors:
-            out.write(f"{err}\n")
+
+def lex_command(args: argparse.Namespace) -> int:
+    source = _read_source(args.input)
+    scanner, tokens = _scan_source(source, args.input)
+
+    # format_output есть в Token; fallback на str/repr, если метод изменят.
+    lines = []
+    for token in tokens:
+        if hasattr(token, "format_output"):
+            lines.append(token.format_output())
+        else:
+            lines.append(str(token))
+
+    if scanner.errors:
+        lines.append("")
+        lines.append("Lexical errors:")
+        lines.extend(str(e) for e in scanner.errors)
+
+    _write_or_print("\n".join(lines), args.output)
+    return 1 if scanner.errors else 0
+
+
+def parse_command(args: argparse.Namespace) -> int:
+    source = _read_source(args.input)
+    ast = _parse_source(source, args.input)
+
+    if args.format == "text":
+        from src.parser.ast_printer import TextPrinter
+        text = TextPrinter().print(ast)
+    elif args.format == "dot":
+        from src.parser.ast_printer import DotPrinter
+        text = DotPrinter().generate(ast)
+    elif args.format == "json":
+        from src.parser.ast_printer import JsonPrinter
+        text = JsonPrinter().serialise(ast)
     else:
-        out.write("Semantic analysis passed.\n")
+        raise SystemExit(f"Unknown format: {args.format}")
 
-        printer = ASTPrinter()
-        printer.print_text(ast, out)
-    if output_file:
-        out.close()
+    _write_or_print(text, args.output)
+    return 0
 
-if __name__ == '__main__':
-    main()
+
+def semantic_command(args: argparse.Namespace) -> int:
+    source = _read_source(args.input)
+    ast = _parse_source(source, args.input)
+
+    from src.semantic.analyzer import SemanticAnalyzer
+    from src.parser.ast_printer import TextPrinter
+
+    analyzer = SemanticAnalyzer(filename=args.input, source=source)
+    ok = analyzer.analyze(ast)
+
+    parts: list[str] = []
+    if args.symbols:
+        parts.append("Symbol table:")
+        parts.append(analyzer.symbol_table.dump())
+        parts.append("")
+
+    if ok:
+        parts.append("Semantic analysis passed.")
+        if args.ast:
+            parts.append("")
+            parts.append(TextPrinter().print(ast))
+    else:
+        parts.append(analyzer.format_errors())
+        parts.append(analyzer.summary())
+
+    _write_or_print("\n".join(parts), args.output)
+    return 0 if ok else 1
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="minicc", description="MiniCompiler CLI")
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    lex = sub.add_parser("lex", help="Tokenize source file")
+    lex.add_argument("-i", "--input", required=True)
+    lex.add_argument("-o", "--output")
+    lex.set_defaults(func=lex_command)
+
+    parse = sub.add_parser("parse", help="Parse source file and print AST")
+    parse.add_argument("-i", "--input", required=True)
+    parse.add_argument("-o", "--output")
+    parse.add_argument("-f", "--format", choices=("text", "dot", "json"), default="text")
+    parse.set_defaults(func=parse_command)
+
+    sem = sub.add_parser("semantic", help="Run semantic analysis")
+    sem.add_argument("-i", "--input", required=True)
+    sem.add_argument("-o", "--output")
+    sem.add_argument("--symbols", action="store_true", help="Print symbol table")
+    sem.add_argument("--ast", action="store_true", help="Print decorated AST when analysis succeeds")
+    sem.set_defaults(func=semantic_command)
+
+    # Алиасы под твой run.py: check = semantic
+    check = sub.add_parser("check", help="Alias for semantic")
+    check.add_argument("-i", "--input", required=True)
+    check.add_argument("-o", "--output")
+    check.add_argument("--symbols", action="store_true")
+    check.add_argument("--ast", action="store_true")
+    check.add_argument("-v", "--verbose", action="store_true")
+    check.set_defaults(func=semantic_command)
+
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    return args.func(args)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -119,11 +119,23 @@ class Parser:
         return params
 
     def _parse_single_param(self) -> ParamNode:
-        type_tok = self._peek()
-        ptype    = self._parse_type()
+        first_tok = self._peek()
+
+        # Support both styles:
+        #   int a
+        #   a: int
+        if (self._peek().type == TokenType.IDENTIFIER
+                and self._peek_next().type == TokenType.COLON):
+            name_tok = self._advance()
+            self._consume(TokenType.COLON, "expected ':'")
+            ptype = self._parse_type()
+            return ParamNode(param_type=ptype, name=name_tok.lexeme,
+                             line=first_tok.line, column=first_tok.column)
+
+        ptype = self._parse_type()
         name_tok = self._consume(TokenType.IDENTIFIER, "expected parameter name")
         return ParamNode(param_type=ptype, name=name_tok.lexeme,
-                         line=type_tok.line, column=type_tok.column)
+                         line=first_tok.line, column=first_tok.column)
 
     def _parse_type(self) -> str:
         tok = self._peek()
@@ -333,7 +345,15 @@ class Parser:
             self._advance()
             if self._check(TokenType.LPAREN):
                 return self._parse_call(tok)
-            return IdentifierExprNode(name=tok.lexeme, line=tok.line, column=tok.column)
+
+            name = tok.lexeme
+            # Parse simple struct field chains as one identifier name: p.x.y
+            while self._match(TokenType.DOT):
+                field_tok = self._consume(TokenType.IDENTIFIER,
+                                          "expected field name after '.'")
+                name += "." + field_tok.lexeme
+
+            return IdentifierExprNode(name=name, line=tok.line, column=tok.column)
 
         if tok.type == TokenType.LPAREN:
             self._advance()

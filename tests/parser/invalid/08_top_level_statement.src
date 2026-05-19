@@ -1,1 +1,6 @@
 int x = 1;
+fn test() {
+    int x = 1 +;
+}
+fn another() {
+    return;

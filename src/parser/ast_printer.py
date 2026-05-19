@@ -490,3 +490,30 @@ class JsonPrinter(ASTVisitor):
                 "target": node.target, "operator": node.operator,
                 "value": node.value.accept(self),
                 "type":  node.resolved_type}
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  Backward-compatible wrappers used by older cli.py/tests
+# ══════════════════════════════════════════════════════════════════════════════
+
+class ASTPrinter:
+    """Compatibility wrapper around TextPrinter."""
+
+    def print_text(self, node: ASTNode, out=None) -> str:
+        text = TextPrinter().print(node)
+        if out is not None:
+            out.write(text)
+            if text and not text.endswith("\n"):
+                out.write("\n")
+        return text
+
+
+class ASTDotPrinter:
+    """Compatibility wrapper around DotPrinter."""
+
+    def print_dot(self, node: ASTNode, out=None) -> str:
+        dot = DotPrinter().generate(node)
+        if out is not None:
+            out.write(dot)
+            if dot and not dot.endswith("\n"):
+                out.write("\n")
+        return dot

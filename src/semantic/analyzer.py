@@ -92,6 +92,47 @@ class SemanticAnalyzer(ASTVisitor):
         node.resolved_type = "error"
         return VOID  # continue analysis with a safe sentinel
 
+    def _lookup_value_type(self, name: str, node: ASTNode) -> Optional[Type]:
+        """Resolve variables and simple struct fields like p.x."""
+        parts = name.split('.')
+        sym = self.symbol_table.lookup(parts[0])
+        if sym is None:
+            self._err(f"undeclared variable '{parts[0]}'", node)
+            return None
+
+        current_type = sym.type
+        for field in parts[1:]:
+            if not isinstance(current_type, StructType):
+                self._err(f"'{'.'.join(parts[:-1])}' is not a struct", node)
+                return None
+            if field not in current_type.fields:
+                self._err(f"struct '{current_type.name}' has no field '{field}'", node)
+                return None
+            current_type = current_type.fields[field]
+        return current_type
+
+    def _lookup_assign_symbol_and_type(self, name: str, node: ASTNode):
+        """Return (base symbol, final target type) for x or p.x."""
+        parts = name.split('.')
+        sym = self.symbol_table.lookup(parts[0])
+        if sym is None:
+            self._err(f"assignment to undeclared variable '{parts[0]}'", node)
+            return None, None
+        if sym.kind not in {SymbolKind.VARIABLE, SymbolKind.PARAMETER}:
+            self._err(f"'{parts[0]}' is not assignable (it is a {sym.kind})", node)
+            return sym, None
+
+        current_type = sym.type
+        for field in parts[1:]:
+            if not isinstance(current_type, StructType):
+                self._err(f"'{'.'.join(parts[:-1])}' is not a struct", node)
+                return sym, None
+            if field not in current_type.fields:
+                self._err(f"struct '{current_type.name}' has no field '{field}'", node)
+                return sym, None
+            current_type = current_type.fields[field]
+        return sym, current_type
+
     # ══════════════════════════════════════════════════════════════════════
     #  Visitor implementations
     # ══════════════════════════════════════════════════════════════════════
@@ -315,27 +356,17 @@ class SemanticAnalyzer(ASTVisitor):
         return self._set_expr_type(node, t)
 
     def visit_identifier_expr(self, node: IdentifierExprNode) -> Type:
-        sym = self.symbol_table.lookup(node.name)
-        if sym is None:
-            # Try to suggest a similar name
-            candidates = [
-                s for s in self.symbol_table.current_scope.symbols
-                if abs(len(s) - len(node.name)) <= 2
-            ]
-            hint = ""
-            if candidates:
-                hint = f"did you mean '{candidates[0]}'?"
-            self._err(f"undeclared variable '{node.name}'", node, hint=hint)
+        t = self._lookup_value_type(node.name, node)
+        if t is None:
             return self._error_type(node)
 
-        if sym.kind == SymbolKind.VARIABLE and not sym.is_initialized:
-            # Warn only – allow analysis to continue
-            self._err(
-                f"variable '{node.name}' may be used before initialization",
-                node,
-            )
+        # Use-before-initialization check only for plain variables.
+        if '.' not in node.name:
+            sym = self.symbol_table.lookup(node.name)
+            if sym and sym.kind == SymbolKind.VARIABLE and not sym.is_initialized:
+                self._err(f"variable '{node.name}' may be used before initialization", node)
 
-        return self._set_expr_type(node, sym.type)
+        return self._set_expr_type(node, t)
 
     def visit_binary_expr(self, node: BinaryExprNode) -> Type:
         left_type = node.left.accept(self)
@@ -413,44 +444,56 @@ class SemanticAnalyzer(ASTVisitor):
         return self._set_expr_type(node, fn_type.return_type)
 
     def visit_assignment_expr(self, node: AssignmentExprNode) -> Type:
-        sym = self.symbol_table.lookup(node.target)
-        if sym is None:
-            self._err(f"assignment to undeclared variable '{node.target}'",
-                      node)
-            node.value.accept(self)  # still check RHS
+        target_type = self._resolve_assignment_target_type(node.target, node)
+        value_type = node.value.accept(self)
+
+        if value_type is None:
             return self._error_type(node)
 
-        if sym.kind not in {SymbolKind.VARIABLE, SymbolKind.PARAMETER}:
+
+        if not target_type.is_assignable_from(value_type):
+
             self._err(
-                f"'{node.target}' is not assignable "
-                f"(it is a {sym.kind})",
+                f"type mismatch in assignment to '{node.target}': "
+                f"expected {target_type}, got {value_type}",
                 node,
             )
+            return self._error_type(node)
 
-        rhs_type = node.value.accept(self)
+        return self._set_expr_type(node, target_type)
 
-        if rhs_type is not None:
-            # Compound assignment operators need operand type check
-            if node.operator != '=':
-                bare_op = node.operator[0]  # '+=' → '+'
-                result = binary_result_type(bare_op, sym.type, rhs_type)
-                if result is None:
-                    self._err(
-                        f"operator '{node.operator}' cannot be applied to "
-                        f"{sym.type} and {rhs_type}",
-                        node,
-                    )
-                    return self._error_type(node)
-                rhs_type = result
-
-            if not sym.type.is_assignable_from(rhs_type):
-                self._err(
-                    f"type mismatch: cannot assign {rhs_type} "
-                    f"to variable '{node.target}' of type {sym.type}",
-                    node,
-                )
-                return self._error_type(node)
-
-        # Mark variable as initialized
         sym.is_initialized = True
         return self._set_expr_type(node, sym.type)
+
+        sym.is_initialized = True
+        return self._set_expr_type(node, target_type)
+
+    def _resolve_assignment_target_type(self, target: str, node: ASTNode) -> Type:
+        if "." not in target:
+            sym = self.symbol_table.lookup(target)
+            if sym is None:
+                self._err(f"undeclared variable '{target}'", node)
+                return VOID
+            sym.is_initialized = True
+            return sym.type
+
+        base_name, field_name = target.split(".", 1)
+        sym = self.symbol_table.lookup(base_name)
+
+        if sym is None:
+            self._err(f"undeclared variable '{base_name}'", node)
+            return VOID
+
+        if not isinstance(sym.type, StructType):
+            self._err(f"'{base_name}' is not a struct", node)
+            return VOID
+
+        if field_name not in sym.type.fields:
+            self._err(
+                f"struct '{sym.type.name}' has no field '{field_name}'",
+                node,
+            )
+            return VOID
+
+        sym.is_initialized = True
+        return sym.type.fields[field_name]

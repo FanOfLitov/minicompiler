@@ -60,6 +60,7 @@ class TokenType(Enum):
     SEMICOLON = ";"
     COMMA     = ","
     COLON     = ":"
+    DOT       = "."
     ARROW     = "->"
 
     EOF   = "EOF"
@@ -112,6 +113,7 @@ TOKEN_NAMES: Dict[TokenType, str] = {
     TokenType.RBRACKET:    "']'",
     TokenType.COMMA:       "','",
     TokenType.COLON:       "':'",
+    TokenType.DOT:         "'.'",
     TokenType.ARROW:       "'->'",
     TokenType.EOF:         "end of file",
 }
@@ -132,7 +134,18 @@ class Token:
         return base
 
     def format_output(self) -> str:
-        base = f"{self.line}:{self.column} {self.type.name} {self.lexeme!r}"
+        def q(value: object) -> str:
+            text = str(value)
+            text = text.replace("\\", "\\\\").replace("\"", "\\\"")
+            return f'"{text}"'
+
+        base = f"{self.line}:{self.column} {self.type.name} {q(self.lexeme)}"
         if self.literal is not None:
-            base += f" {self.literal!r}"
+            if isinstance(self.literal, bool):
+                lit = "true" if self.literal else "false"
+            elif isinstance(self.literal, str):
+                lit = q(self.literal)
+            else:
+                lit = str(self.literal)
+            base += f" {lit}"
         return base

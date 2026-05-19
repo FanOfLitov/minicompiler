@@ -32,6 +32,9 @@ class Scanner:
         self._col_start: int = 1
         self._col:      int = 1
 
+    def scan_tokens(self) -> List[Token]:
+        return self.scan_all()
+
     def scan_all(self) -> List[Token]:
         while not self._is_at_end():
             self._start      = self._current
@@ -112,11 +115,12 @@ class Scanner:
         elif c == '"':
             self._scan_string()
         elif c == '.':
-            # Поддержка чисел, начинающихся с точки, например .5
+            # Field/member access: p.x
+            # Floats like .5 are still supported.
             if self._peek().isdigit():
                 self._scan_float_starting_with_dot()
             else:
-                self._error("unexpected character '.'")
+                self._add_token(TokenType.DOT)
         else:
             if c.isdigit():
                 self._scan_number(c)
@@ -202,39 +206,47 @@ class Scanner:
             self._advance()
 
         is_float = False
-        if (not self._is_at_end() and self._peek() == '.'
-                and self._peek_next().isdigit()):
-            is_float = True
-            self._advance()
-            while not self._is_at_end() and self._peek().isdigit():
+
+        if not self._is_at_end() and self._peek() == '.':
+            if self._peek_next().isdigit():
+                is_float = True
                 self._advance()
+                while not self._is_at_end() and self._peek().isdigit():
+                    self._advance()
+            else:
+                self._advance()
+                self._errors_at(
+                    self._line,
+                    self._col_start,
+                    "float literal missing digits after decimal point"
+                )
+                return
 
         lexeme = self._source[self._start:self._current]
 
-        # Ошибка: идентификатор начинается с цифры (например, 1abc)
         if not self._is_at_end() and (self._peek().isalpha() or self._peek() == '_'):
             while not self._is_at_end() and (self._peek().isalnum() or self._peek() == '_'):
                 self._advance()
             full_lexeme = self._source[self._start:self._current]
-            self._errors_at(self._line, self._col_start, f"invalid identifier starting with digit: '{full_lexeme}'")
+            self._errors_at(
+                self._line,
+                self._col_start,
+                f"invalid identifier starting with digit: '{full_lexeme}'"
+            )
             return
 
         if is_float:
-            value = float(lexeme)
             self._tokens.append(
-                Token(TokenType.FLOAT_LITERAL, lexeme,
-                      self._line, self._col_start, value)
+                Token(TokenType.FLOAT_LITERAL, lexeme, self._line, self._col_start, float(lexeme))
             )
         else:
             value = int(lexeme)
             if not (INT_MIN <= value <= INT_MAX):
                 self._error(
-                    f"integer literal {value} is out of range "
-                    f"[{INT_MIN}, {INT_MAX}]"
+                    f"integer literal {value} is out of range [{INT_MIN}, {INT_MAX}]"
                 )
             self._tokens.append(
-                Token(TokenType.INT_LITERAL, lexeme,
-                      self._line, self._col_start, value)
+                Token(TokenType.INT_LITERAL, lexeme, self._line, self._col_start, value)
             )
 
     def _scan_float_starting_with_dot(self) -> None:
