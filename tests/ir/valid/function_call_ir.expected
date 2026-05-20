@@ -1,0 +1,13 @@
+function add: int (a: int, b: int)
+  entry:
+    t1 = LOAD a
+    t2 = LOAD b
+    t3 = ADD t1, t2    # +
+    RETURN t3
+
+function main: int ()
+  entry:
+    t4 = CALL add, 2, 3
+    STORE result, t4    # result initialization
+    t5 = LOAD result
+    RETURN t5

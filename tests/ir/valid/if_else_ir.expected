@@ -1,0 +1,14 @@
+function main: int ()
+  entry:
+    STORE x, 1    # x initialization
+    t1 = LOAD x
+    t2 = CMP_GT t1, 0    # >
+    JUMP_IF_NOT t2, else1    # if condition false
+    STORE x, 2    # x =
+    JUMP endif2
+  else1:
+    STORE x, 3    # x =
+    JUMP endif2
+  endif2:
+    t3 = LOAD x
+    RETURN t3
