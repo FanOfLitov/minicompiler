@@ -20,6 +20,8 @@ def main():
         ir_command()
     elif command in ("--help", "-h"):
         show_help()
+    elif command in ("asm", "codegen"):
+        asm_command()
     else:
         print(f"Unknown command: {command}")
         show_help()
@@ -47,6 +49,10 @@ def show_help():
     print("  --input, -i FILE       Input source file")
     print("  --output, -o FILE      Output file")
     print("  --format, -f FORMAT    Output format")
+    print("  asm --input FILE [--output FILE]")
+    print("  codegen --input FILE [--output FILE]")
+    print("      Generate x86-64 assembly from source file.")
+    print()
     print("  --help, -h             Show this help message")
 
 
@@ -330,7 +336,41 @@ def ir_command():
         output_file,
         success_message=f"IR written to {output_file}" if output_file else None,
     )
+def asm_command():
+    input_file = None
+    output_file = None
 
+    i = 2
+    while i < len(sys.argv):
+        arg = sys.argv[i]
+        if arg in ("--input", "-i") and i + 1 < len(sys.argv):
+            input_file = sys.argv[i + 1]
+            i += 2
+        elif arg in ("--output", "-o") and i + 1 < len(sys.argv):
+            output_file = sys.argv[i + 1]
+            i += 2
+        else:
+            print(f"Unknown argument for asm: {arg}")
+            sys.exit(1)
+
+    if not input_file:
+        print("Error: No input file specified. Use --input <file>")
+        sys.exit(1)
+
+    source = _read_source(input_file)
+    ast, _analyzer = _semantic_check(source, input_file)
+
+    from src.ir.ir_generator import IRGenerator
+    from src.codegen.x86_generator import X86Generator
+
+    ir_program = IRGenerator().generate(ast)
+    assembly = X86Generator().generate(ir_program)
+
+    _write_or_print(
+        assembly,
+        output_file,
+        success_message=f"Assembly written to {output_file}" if output_file else None,
+    )
 
 if __name__ == "__main__":
     main()
