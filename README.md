@@ -327,4 +327,4 @@ tree
 - semantic error reporter;
 - pytest-наборы для lexer, parser и semantic.
 
-Следующий логичный этап — Sprint 4: промежуточное представление IR и генерация IR из проверенного AST.
+дальше Sprint 4: промежуточное представление IR и генерация IR 
