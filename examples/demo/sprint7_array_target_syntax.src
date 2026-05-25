@@ -1,0 +1,10 @@
+// Sprint 7 target syntax demo.
+// Full parser support for arrays can be added after the backend helpers.
+
+extern int printf(string, ...);
+
+fn main() -> int {
+    // int arr[5] = {5, 1, 4, 2, 3};
+    // printf("array demo\n");
+    return 0;
+}
