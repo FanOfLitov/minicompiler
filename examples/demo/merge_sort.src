@@ -1,0 +1,56 @@
+// Merge Sort demo for MiniCompiler course project.
+//
+// Current frontend is simplified. Full array syntax is documented as
+// Sprint 7 target feature, while backend support for array layout is
+// implemented in src/codegen/array_generator.py.
+
+fn merge(arr: int, left: int, mid: int, right: int) -> void {
+    // Target Sprint 7 array version:
+    //
+    // int n1 = mid - left + 1;
+    // int n2 = right - mid;
+    // int L[10];
+    // int R[10];
+    //
+    // for (int i = 0; i < n1; i = i + 1) {
+    //     L[i] = arr[left + i];
+    // }
+    //
+    // for (int j = 0; j < n2; j = j + 1) {
+    //     R[j] = arr[mid + 1 + j];
+    // }
+    //
+    // while (i < n1 && j < n2) {
+    //     if (L[i] <= R[j]) {
+    //         arr[k] = L[i];
+    //     } else {
+    //         arr[k] = R[j];
+    //     }
+    // }
+
+    return;
+}
+
+fn merge_sort(arr: int, left: int, right: int) -> void {
+    if (left < right) {
+        int mid = left + (right - left) / 2;
+
+        merge_sort(arr, left, mid);
+        merge_sort(arr, mid + 1, right);
+        merge(arr, left, mid, right);
+    }
+
+    return;
+}
+
+fn main() -> int {
+    // Target Sprint 7 array version:
+    //
+    // int values[8] = {8, 3, 5, 1, 9, 2, 7, 4};
+    // merge_sort(values, 0, 7);
+
+    int fake_array_address = 0;
+    merge_sort(fake_array_address, 0, 7);
+
+    return 0;
+}

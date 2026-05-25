@@ -1,6 +1,6 @@
 # MiniCompiler
 
-MiniCompiler — учебный компилятор для упрощённого C-like языка. Проект реализуется по спринтам: лексический анализ, синтаксический анализ, построение AST, семантический анализ, таблица символов и базовая система типов.
+MiniCompiler — учебный компилятор для упрощённого C-like языка. Проект реализуется по спринтам: лексический анализ, синтаксический анализ, построение AST, семантический анализ, таблица символов, промежуточное представление, оптимизации и генерация x86-64 assembly.
 
 Проект написан на Python и предназначен для демонстрации основных этапов работы компилятора.
 
@@ -59,64 +59,287 @@ MiniCompiler — учебный компилятор для упрощённог
 - проверка условий в `if`, `while`, `for`;
 - сообщения об ошибках семантического анализа.
 
+## Sprint 4 — Intermediate Representation / IR
+
+На четвёртом спринте реализовано промежуточное представление программы (IR — Intermediate Representation).
+
+Основная цель этого этапа — отделить frontend компилятора (lexer, parser, semantic analysis) от backend-части (optimizer и code generation).
+
+В качестве промежуточного представления используется IR в стиле three-address code.
+
+Каждая сложная операция разбивается на последовательность простых инструкций с использованием временных переменных.
+
+### Реализовано
+
+Поддерживаются:
+
+- генерация IR из AST;
+- временные переменные (`t1`, `t2`, ...);
+- базовые блоки (`BasicBlock`);
+- переходы между блоками;
+- условные переходы;
+- арифметические операции;
+- сравнения;
+- вызовы функций;
+- инструкции `return`;
+- представление потока управления (CFG);
+- текстовый вывод IR;
+- генерация DOT-представления CFG.
+
+### Архитектура IR
+
+```text
+src/ir/
+├── basic_block.py
+├── control_flow.py
+├── ir_generator.py
+├── ir_instructions.py
+└── __init__.py
+```
+
+### Как проходила реализация
+
+Работа над Sprint 4 была первым переходом от "анализа текста программы" к "внутреннему представлению программы".
+
+До этого компилятор только:
+- разбирал код;
+- строил AST;
+- проверял типы.
+
+На этом этапе появилась полноценная внутренняя модель программы, пригодная для:
+- оптимизаций;
+- анализа потока управления;
+- генерации assembly-кода.
+
+Особенно много времени заняла:
+- генерация временных переменных;
+- правильное разбиение на basic blocks;
+- генерация переходов для `if / else`;
+- генерация циклов `while`;
+- сохранение корректного порядка вычислений.
+
+### Пример IR
+
+Исходный код:
+
+```c
+int x = 2 + 3;
+```
+
+IR:
+
+```text
+t1 = CONST 2
+t2 = CONST 3
+t3 = ADD t1, t2
+STORE x, t3
+```
+
+### Тесты IR
+
+Добавлены:
+- валидные IR-тесты;
+- невалидные IR-тесты;
+- сравнение с `.expected`;
+- тестирование CFG;
+- тестирование three-address representation.
+
+## Sprint 5 — x86-64 Code Generation
+
+На пятом спринте реализована backend-часть компилятора — генерация x86-64 assembly-кода.
+
+На этом этапе IR преобразуется в низкоуровневое представление, которое уже может быть собрано assembler-ом.
+
+### Реализовано
+
+Поддерживаются:
+
+- генерация x86-64 assembly;
+- stack frame;
+- function prologue / epilogue;
+- размещение локальных переменных на стеке;
+- работа с регистрами;
+- арифметические операции;
+- сравнения;
+- условные переходы;
+- вызовы функций;
+- возврат значений через `rax`;
+- генерация `.text` section;
+- генерация labels.
+
+### Архитектура backend
+
+```text
+src/codegen/
+├── abi.py
+├── register_allocator.py
+├── stack_frame.py
+├── x86_generator.py
+└── __init__.py
+```
+
+### Особенности реализации
+
+Самой сложной частью Sprint 5 оказались:
+- стековые смещения;
+- корректная работа со стековым фреймом;
+- передача аргументов функций;
+- управление временными значениями;
+- соответствие System V ABI.
+
+Также пришлось отдельно реализовывать:
+- генерацию labels;
+- работу условных переходов;
+- генерацию call-инструкций.
+
+## Sprint 6 — Optimizer
+
+На шестом спринте реализованы базовые оптимизации IR.
+
+Оптимизатор запускается после генерации IR и до генерации assembly.
+
+### Реализовано
+
+Поддерживаются:
+
+- constant folding;
+- dead code elimination;
+- упрощение выражений;
+- удаление неиспользуемых инструкций;
+- optional optimize mode (`--optimize`).
+
+### Архитектура optimizer
+
+```text
+src/optimizer/
+├── constant_folding.py
+├── dead_code.py
+├── optimizer.py
+└── __init__.py
+```
+
+### Как проходила реализация
+
+Этот этап был первым шагом к "настоящему компилятору", потому что программа начала не просто транслироваться, а улучшаться перед генерацией assembly.
+
+Основные сложности:
+- безопасное удаление инструкций;
+- определение "мертвого" кода;
+- вычисление констант на этапе компиляции;
+- сохранение корректности CFG.
+
+## Sprint 7 — Advanced Features
+
+На седьмом спринте реализована база для расширенных возможностей языка и backend-инфраструктуры.
+
+Этот этап стал самым объёмным и экспериментальным.
+
+### Реализовано
+
+Добавлены:
+
+- поддержка layout массивов;
+- вычисление адресов элементов массива;
+- compile-time bounds checks;
+- поддержка внешних функций;
+- variadic external calls (`printf`);
+- constant propagation;
+- algebraic simplification;
+- infrastructure для дальнейшего расширения frontend.
+
+### Новые модули
+
+```text
+src/codegen/
+├── array_generator.py
+└── external_calls.py
+
+src/optimizer/
+└── advanced_passes.py
+
+src/libc/
+└── stdlib.h
+```
+
+### Работа с массивами
+
+Реализованы:
+- вычисление размера массива;
+- flatten index для многомерных массивов;
+- расчёт byte offsets;
+- генерация адресов элементов;
+- compile-time проверки индексов.
+
+### External Calls
+
+Добавлена инфраструктура для:
+- `printf`;
+- `puts`;
+- `strlen`;
+- `malloc`;
+- `free`;
+- variadic functions.
+
+### Merge Sort Demo
+
+Для демонстрации проекта реализован пример Merge Sort:
+
+```text
+examples/demo/merge_sort.src
+```
+
+Пример показывает:
+- рекурсию;
+- вызовы функций;
+- условия;
+- подготовленную инфраструктуру массивов;
+- полный compiler pipeline.
+
+### Bash-скрипт для защиты
+
+Добавлен:
+
+```text
+scripts/defense_demo.sh
+```
+
+Скрипт последовательно демонстрирует:
+1. lexer;
+2. parser;
+3. semantic analysis;
+4. IR;
+5. x86-64 code generation;
+6. optimizer;
+7. advanced features.
+
 ## Структура проекта
 
 ```text
 minicompiler/
 ├── docs/
 ├── examples/
-│   └── hello.src
+├── scripts/
 ├── src/
-│   ├── cli.py
 │   ├── lexer/
-│   │   ├── scanner.py
-│   │   ├── token_types.py
-│   │   └── __init__.py
 │   ├── parser/
-│   │   ├── ast_nodes.py
-│   │   ├── ast_printer.py
-│   │   ├── parser.py
-│   │   └── __init__.py
 │   ├── semantic/
-│   │   ├── analyzer.py
-│   │   ├── errors.py
-│   │   ├── symbol_table.py
-│   │   ├── type_system.py
-│   │   └── __init__.py
-│   └── utils/
-│       ├── error_reporter.py
-│       └── __init__.py
+│   ├── ir/
+│   ├── optimizer/
+│   ├── codegen/
+│   ├── libc/
+│   └── cli.py
 ├── tests/
 │   ├── lexer/
-│   │   ├── valid/
-│   │   ├── invalid/
-│   │   └── test_scanner.py
 │   ├── parser/
-│   │   ├── valid/
-│   │   ├── invalid/
-│   │   └── test_parser.py
-│   └── semantic/
-│       ├── valid/
-│       ├── invalid/
-│       └── test_semantic.py
+│   ├── semantic/
+│   ├── ir/
+│   ├── codegen/
+│   ├── optimizer/
+│   └── sprint7/
 ├── main.py
 ├── run.py
 ├── setup.py
 └── README.md
-```
-
-## Требования
-
-Рекомендуемая версия Python:
-
-```bash
-Python 3.10+
-```
-
-Установка зависимостей для тестирования:
-
-```bash
-py -m pip install pytest
 ```
 
 ## Запуск тестов
@@ -133,22 +356,16 @@ py run.py test
 py -m pytest tests/ -v
 ```
 
-Запустить только lexer-тесты:
+Запустить тесты по спринтам:
 
 ```bash
 py -m pytest tests/lexer -v
-```
-
-Запустить только parser-тесты:
-
-```bash
 py -m pytest tests/parser -v
-```
-
-Запустить только semantic-тесты:
-
-```bash
 py -m pytest tests/semantic -v
+py -m pytest tests/ir -v
+py -m pytest tests/codegen -v
+py -m pytest tests/optimizer -v
+py -m pytest tests/sprint7 -v
 ```
 
 ## Использование CLI
@@ -156,175 +373,68 @@ py -m pytest tests/semantic -v
 ### Лексический анализ
 
 ```bash
-py main.py lex --input examples/hello.src
-```
-
-С сохранением результата в файл:
-
-```bash
-py main.py lex --input examples/hello.src --output tokens.txt
+py main.py lex --input examples/demo/merge_sort.src
 ```
 
 ### Синтаксический анализ
 
-Вывести AST в текстовом формате:
-
 ```bash
-py main.py parse --input examples/hello.src --format text
-```
-
-Вывести AST в DOT-формате:
-
-```bash
-py main.py parse --input examples/hello.src --format dot --output ast.dot
+py main.py parse --input examples/demo/merge_sort.src --format text
 ```
 
 ### Семантический анализ
 
 ```bash
-py main.py semantic --input examples/hello.src
+py main.py semantic --input examples/demo/merge_sort.src --symbols
 ```
 
-С выводом таблицы символов:
+### Генерация IR
 
 ```bash
-py main.py semantic --input examples/hello.src --symbols
+py main.py ir --input examples/demo/merge_sort.src
 ```
 
-## Пример исходного кода
-
-```c
-fn add(a: int, b: int) -> int {
-    return a + b;
-}
-
-fn main() -> int {
-    int result = add(2, 3);
-    return result;
-}
-```
-
-## Формат lexer-тестов
-
-Для валидных lexer-тестов используется пара файлов:
-
-```text
-tests/lexer/valid/example.src
-tests/lexer/valid/example.txt
-```
-
-Файл `.src` содержит исходный код, а `.txt` содержит ожидаемый поток токенов.
-
-Пример:
-
-```text
-1:1 KW_FN "fn"
-1:4 IDENTIFIER "main"
-1:8 LPAREN "("
-1:9 RPAREN ")"
-1:11 ARROW "->"
-1:14 KW_INT "int"
-```
-
-Для невалидных lexer-тестов используются файлы в:
-
-```text
-tests/lexer/invalid/
-```
-
-Такие тесты должны приводить к ошибке лексического анализа.
-
-## Формат parser-тестов
-
-Валидные parser-тесты находятся в:
-
-```text
-tests/parser/valid/
-```
-
-Для каждого `.src` есть соответствующий `.expected`, с которым сравнивается текстовое представление AST.
-
-Невалидные parser-тесты находятся в:
-
-```text
-tests/parser/invalid/
-```
-
-Они проверяют, что парсер корректно сообщает о синтаксических ошибках.
-
-## Формат semantic-тестов
-
-Валидные semantic-тесты находятся в:
-
-```text
-tests/semantic/valid/
-```
-
-Для них `.expected` не требуется. Тест считается успешным, если семантический анализ завершился без ошибок.
-
-Невалидные semantic-тесты находятся в:
-
-```text
-tests/semantic/invalid/
-```
-
-Для них используется пара:
-
-```text
-example.src
-example.expected
-```
-
-Файл `.expected` содержит ожидаемое сообщение об ошибке.
-
-## Пример семантической ошибки
-
-```c
-fn main() -> void {
-    int x;
-    x = 3.14;
-}
-```
-
-Ожидаемая ошибка:
-
-```text
-semantic error at type_mismatch_assignment.src:3:5: type mismatch in assignment to 'x': expected int, got float
-```
-
-## Полезные команды
-
-Очистить временные файлы:
+### Генерация assembly
 
 ```bash
-py run.py clean
+py main.py asm --input examples/demo/merge_sort.src --output build/merge_sort.asm
 ```
 
-Вывести структуру проекта:
+### Генерация optimized assembly
 
 ```bash
-tree /f
+py main.py asm --input examples/demo/sprint7_optimization_demo.src --output build/optimized.asm --optimize
 ```
 
-На Linux/macOS:
+## Bash-демонстрация проекта
 
 ```bash
-tree
+bash scripts/defense_demo.sh
 ```
 
-## Текущее состояние
+## Итоговое состояние проекта
 
-На данный момент реализованы основные части первых трёх спринтов:
+На текущий момент реализован полноценный compiler pipeline:
 
-- scanner;
-- token definitions;
-- parser;
-- AST nodes;
-- AST printer;
-- semantic analyzer;
-- symbol table;
-- type system;
-- semantic error reporter;
-- pytest-наборы для lexer, parser и semantic.
+```text
+source code
+-> lexer
+-> parser
+-> AST
+-> semantic analysis
+-> IR
+-> optimizer
+-> x86-64 assembly
+```
 
-дальше Sprint 4: промежуточное представление IR и генерация IR 
+Проект включает:
+- frontend;
+- backend;
+- optimizer;
+- тестовую инфраструктуру;
+- CLI;
+- документацию;
+- demo-программы;
+- bash-скрипты для демонстрации по спринтам.
+
+Проект разрабатывался поэтапно, с постепенным усложнением архитектуры компилятора и сохранением совместимости между спринтами.
