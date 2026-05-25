@@ -1,0 +1,6 @@
+function main: int ()
+  entry:
+    t1 = DIV 8, 2    # /
+    STORE x, t1    # x initialization
+    t2 = LOAD x
+    RETURN t2

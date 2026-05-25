@@ -1,0 +1,16 @@
+function main: int ()
+  entry:
+    STORE x, 1    # x initialization
+    JUMP while1
+  while1:
+    t1 = LOAD x
+    t2 = CMP_LT t1, 2    # <
+    JUMP_IF_NOT t2, while_end3
+  while_body2:
+    t3 = LOAD x
+    t4 = ADD t3, 1    # +
+    STORE x, t4    # x =
+    JUMP while1
+  while_end3:
+    t5 = LOAD x
+    RETURN t5

@@ -1,0 +1,4 @@
+fn main() -> int {
+    int x = 8 / 2;
+    return x;
+}

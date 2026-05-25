@@ -1,5 +1,6 @@
 # src/cli.py
 import sys
+from src.optimizer.optimizer import IROptimizer
 
 
 def main():
@@ -20,6 +21,8 @@ def main():
         ir_command()
     elif command in ("--help", "-h"):
         show_help()
+    elif command in ("asm", "codegen"):
+        asm_command()
     elif command in ("asm", "codegen"):
         asm_command()
     else:
@@ -287,7 +290,7 @@ def semantic_command():
 def ir_command():
     input_file = None
     output_file = None
-    fmt = "text"
+    optimize = False
 
     i = 2
     while i < len(sys.argv):
@@ -309,32 +312,26 @@ def ir_command():
         print("Error: No input file specified. Use --input <file>")
         sys.exit(1)
 
-    if fmt not in ("text", "dot"):
-        print(f"Error: Unknown IR format '{fmt}'. Supported formats: text, dot")
-        sys.exit(1)
+
 
     source = _read_source(input_file)
     ast, _analyzer = _semantic_check(source, input_file)
 
     from src.ir.ir_generator import IRGenerator
-    from src.ir.control_flow import function_to_dot
+    from src.codegen.x86_generator import X86Generator
 
-    generator = IRGenerator()
-    program = generator.generate(ast)
+    ir_program = IRGenerator().generate(ast)
 
-    if fmt == "text":
-        output_text = program.dump()
-    else:
-        if not program.functions:
-            output_text = "digraph empty_cfg {\n}"
-        else:
-            first_function = next(iter(program.functions.values()))
-            output_text = function_to_dot(first_function)
+    if optimize:
+        from src.optimizer.optimizer import IROptimizer
+        ir_program = IROptimizer().optimize(ir_program)
+
+    assembly = X86Generator().generate(ir_program)
 
     _write_or_print(
-        output_text,
+        assembly,
         output_file,
-        success_message=f"IR written to {output_file}" if output_file else None,
+        success_message=f"Assembly written to {output_file}" if output_file else None,
     )
 def asm_command():
     input_file = None

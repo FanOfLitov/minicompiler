@@ -1,0 +1,8 @@
+function main: int ()
+  entry:
+    STORE a, 2    # a initialization
+    t1 = LOAD a
+    t2 = ADD t1, 3    # +
+    STORE x, t2    # x initialization
+    t3 = LOAD x
+    RETURN t3
