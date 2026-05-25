@@ -1,0 +1,16 @@
+fn add(a: int, b: int) -> int {
+    return a + b;
+}
+
+fn main() -> int {
+    int x = 2;
+    int y = 3;
+
+    int z = add(x, y);
+
+    if (z > 4) {
+        z = z + 1;
+    }
+
+    return z;
+}

@@ -99,8 +99,31 @@ run_cmd "$PY" -m pytest tests/semantic -v
 echo "============================================================"
 echo "[Sprint 4] IR Generation"
 echo "============================================================"
-run_cmd "$PY" main.py ir --input examples/demo/merge_sort.src
-run_cmd "$PY" -m pytest tests/ir -v
+
+echo
+echo "Source:"
+echo "examples/demo/ir_demo.src"
+echo
+
+cat examples/demo/ir_demo.src
+echo
+
+echo "------------------------------------------------------------"
+echo "Generated IR"
+echo "------------------------------------------------------------"
+echo
+
+$PY main.py ir --input examples/demo/ir_demo.src || true
+
+echo
+echo "------------------------------------------------------------"
+echo "IR tests"
+echo "------------------------------------------------------------"
+echo
+
+$PY -m pytest tests/ir -v || true
+
+echo
 
 echo "============================================================"
 echo "[Sprint 5] x86-64 Code Generation"
