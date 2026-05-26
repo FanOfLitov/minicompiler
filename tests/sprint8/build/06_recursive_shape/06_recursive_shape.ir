@@ -1,0 +1,17 @@
+function countdown: int (n: int)
+  entry:
+    t1 = LOAD n
+    t2 = CMP_GT t1, 0    # >
+    JUMP_IF_NOT t2, endif2    # if condition false
+    t3 = LOAD n
+    t4 = SUB t3, 1    # -
+    t5 = CALL countdown, t4
+    RETURN t5
+    JUMP endif2
+  endif2:
+    RETURN 0
+
+function main: int ()
+  entry:
+    t6 = CALL countdown, 3
+    RETURN t6

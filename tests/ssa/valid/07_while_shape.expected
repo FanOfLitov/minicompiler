@@ -1,0 +1,16 @@
+ssa function main: int ()
+  entry:
+    x.1 = MOVE 0    # ssa store
+    JUMP while1
+  while1:
+    t1_1 = MOVE x.1    # ssa load
+    t2_1 = CMP_LT t1_1, 2    # <
+    JUMP_IF_NOT t2_1, while_end3
+  while_body2:
+    t3_1 = MOVE x.1    # ssa load
+    t4_1 = ADD t3_1, 1    # +
+    x.2 = MOVE t4_1    # ssa store
+    JUMP while1
+  while_end3:
+    t5_1 = MOVE x.2    # ssa load
+    RETURN t5_1

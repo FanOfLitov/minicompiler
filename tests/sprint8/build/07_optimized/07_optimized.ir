@@ -1,0 +1,6 @@
+function main: int ()
+  entry:
+    t1 = MOVE 5    # constant folded
+    STORE x, t1    # x initialization
+    t2 = LOAD x
+    RETURN t2

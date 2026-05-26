@@ -25,6 +25,8 @@ def main():
         asm_command()
     elif command in ("asm", "codegen"):
         asm_command()
+    elif command == "ssa":
+        ssa_command()
     else:
         print(f"Unknown command: {command}")
         show_help()
@@ -260,6 +262,7 @@ def semantic_command():
         elif arg == "--symbols":
             show_symbols = True
             i += 1
+
         else:
             print(f"Unknown argument for semantic: {arg}")
             sys.exit(1)
@@ -290,7 +293,6 @@ def semantic_command():
 def ir_command():
     input_file = None
     output_file = None
-    optimize = False
 
     i = 2
     while i < len(sys.argv):
@@ -301,9 +303,6 @@ def ir_command():
         elif arg in ("--output", "-o") and i + 1 < len(sys.argv):
             output_file = sys.argv[i + 1]
             i += 2
-        elif arg in ("--format", "-f") and i + 1 < len(sys.argv):
-            fmt = sys.argv[i + 1].lower()
-            i += 2
         else:
             print(f"Unknown argument for ir: {arg}")
             sys.exit(1)
@@ -312,27 +311,57 @@ def ir_command():
         print("Error: No input file specified. Use --input <file>")
         sys.exit(1)
 
+    source = _read_source(input_file)
+    ast, _analyzer = _semantic_check(source, input_file)
 
+    from src.ir.ir_generator import IRGenerator
+
+    ir_program = IRGenerator().generate(ast)
+    output_text = ir_program.dump()
+
+    _write_or_print(
+        output_text,
+        output_file,
+        success_message=f"IR written to {output_file}" if output_file else None,
+    )
+
+def ssa_command():
+    input_file = None
+    output_file = None
+
+    i = 2
+    while i < len(sys.argv):
+        arg = sys.argv[i]
+        if arg in ("--input", "-i") and i + 1 < len(sys.argv):
+            input_file = sys.argv[i + 1]
+            i += 2
+        elif arg in ("--output", "-o") and i + 1 < len(sys.argv):
+            output_file = sys.argv[i + 1]
+            i += 2
+        else:
+            print(f"Unknown argument for ssa: {arg}")
+            sys.exit(1)
+
+    if not input_file:
+        print("Error: No input file specified. Use --input <file>")
+        sys.exit(1)
 
     source = _read_source(input_file)
     ast, _analyzer = _semantic_check(source, input_file)
 
     from src.ir.ir_generator import IRGenerator
-    from src.codegen.x86_generator import X86Generator
+    from src.ssa.ssa_builder import SSABuilder
 
     ir_program = IRGenerator().generate(ast)
-
-    if optimize:
-        from src.optimizer.optimizer import IROptimizer
-        ir_program = IROptimizer().optimize(ir_program)
-
-    assembly = X86Generator().generate(ir_program)
+    ssa_program = SSABuilder().build(ir_program)
 
     _write_or_print(
-        assembly,
+        ssa_program.dump(),
         output_file,
-        success_message=f"Assembly written to {output_file}" if output_file else None,
+        success_message=f"SSA IR written to {output_file}" if output_file else None,
     )
+
+
 def asm_command():
     input_file = None
     output_file = None

@@ -1,0 +1,13 @@
+ssa function add: int (a: int, b: int)
+  entry:
+    t1_1 = MOVE a    # ssa load
+    t2_1 = MOVE b    # ssa load
+    t3_1 = ADD t1_1, t2_1    # +
+    RETURN t3_1
+
+ssa function main: int ()
+  entry:
+    t4_1 = CALL add, 2, 3
+    x.1 = MOVE t4_1    # ssa store
+    t5_1 = MOVE x.1    # ssa load
+    RETURN t5_1

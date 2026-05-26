@@ -1,0 +1,7 @@
+function main: int ()
+  entry:
+    t1 = MUL 3, 4    # *
+    t2 = ADD 2, t1    # +
+    STORE x, t2    # x initialization
+    t3 = LOAD x
+    RETURN t3

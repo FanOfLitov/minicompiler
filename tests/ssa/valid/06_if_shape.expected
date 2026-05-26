@@ -1,0 +1,11 @@
+ssa function main: int ()
+  entry:
+    x.1 = MOVE 1    # ssa store
+    t1_1 = MOVE x.1    # ssa load
+    t2_1 = CMP_GT t1_1, 0    # >
+    JUMP_IF_NOT t2_1, endif2    # if condition false
+    x.2 = MOVE 2    # ssa store
+    JUMP endif2
+  endif2:
+    t3_1 = MOVE x.2    # ssa load
+    RETURN t3_1

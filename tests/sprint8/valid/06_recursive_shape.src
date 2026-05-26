@@ -1,0 +1,10 @@
+fn countdown(n: int) -> int {
+    if (n > 0) {
+        return countdown(n - 1);
+    }
+    return 0;
+}
+
+fn main() -> int {
+    return countdown(3);
+}

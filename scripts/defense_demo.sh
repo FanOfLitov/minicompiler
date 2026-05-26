@@ -1,40 +1,15 @@
 #!/usr/bin/env bash
-
-# MiniCompiler defense demo script.
-# Run from project root:
-#   bash scripts/defense_demo.sh
-#
-# The script automatically chooses a usable Python command.
-# On Windows Git Bash, /usr/bin/py is often NOT Python Launcher,
-# so we prefer python3/python/python.exe and only then py.
-
 set +e
 
 detect_python() {
-
-    # Windows Python Launcher
-    if command -v py.exe >/dev/null 2>&1; then
-        echo "py.exe"
-        return 0
-    fi
-
-    # Windows python
-    if command -v python.exe >/dev/null 2>&1; then
-        echo "python.exe"
-        return 0
-    fi
-
-    # fallback
-    if command -v py >/dev/null 2>&1; then
-        echo "py"
-        return 0
-    fi
-
-    if command -v python >/dev/null 2>&1; then
-        echo "python"
-        return 0
-    fi
-
+    for candidate in python.exe python py.exe py python3; do
+        if command -v "$candidate" >/dev/null 2>&1; then
+            if "$candidate" -c "import sys; print(sys.version)" >/dev/null 2>&1; then
+                echo "$candidate"
+                return 0
+            fi
+        fi
+    done
     return 1
 }
 
@@ -42,13 +17,10 @@ PY=${PYTHON_CMD:-$(detect_python)}
 
 if [ -z "$PY" ]; then
     echo "ERROR: Python was not found."
-    echo "Try running one of these manually:"
-    echo "  python --version"
-    echo "  python3 --version"
-    echo "  python.exe --version"
-    echo "  py --version"
     exit 1
 fi
+
+mkdir -p build
 
 run_cmd() {
     echo
@@ -65,8 +37,6 @@ echo "============================================================"
 echo "MiniCompiler Defense Demo"
 echo "============================================================"
 echo
-
-echo "[0] Environment"
 echo "Selected Python command: $PY"
 run_cmd "$PY" --version
 
@@ -97,43 +67,50 @@ run_cmd "$PY" main.py semantic --input examples/demo/merge_sort.src --symbols
 run_cmd "$PY" -m pytest tests/semantic -v
 
 echo "============================================================"
-echo "[Sprint 4] IR Generation"
+echo "[Sprint 4] Intermediate Representation: IR and SSA"
 echo "============================================================"
 
 echo
-echo "Source:"
-echo "examples/demo/ir_demo.src"
+echo "This sprint demonstrates the required middle layer:"
+echo "source -> lexer -> parser -> AST -> semantic -> IR -> SSA IR -> ASM"
 echo
-
-cat examples/demo/ir_demo.src
+echo "Source file:"
+echo "examples/demo/ir_ssa_demo.src"
+echo "------------------------------------------------------------"
+cat examples/demo/ir_ssa_demo.src
 echo
 
 echo "------------------------------------------------------------"
-echo "Generated IR"
+echo "Step 4.1: Normal IR / three-address code"
+echo "This is NOT assembly. It is compiler intermediate representation."
 echo "------------------------------------------------------------"
-echo
+run_cmd "$PY" main.py ir --input examples/demo/ir_ssa_demo.src
 
-$PY main.py ir --input examples/demo/ir_demo.src || true
-
-echo
 echo "------------------------------------------------------------"
-echo "IR tests"
+echo "Step 4.2: SSA-like IR"
+echo "Each assignment gets a visible version: x.1, x.2, t1_1..."
 echo "------------------------------------------------------------"
-echo
+run_cmd "$PY" main.py ssa --input examples/demo/ir_ssa_demo.src
 
-$PY -m pytest tests/ir -v || true
+echo "------------------------------------------------------------"
+echo "Step 4.3: IR tests"
+echo "------------------------------------------------------------"
+run_cmd "$PY" -m pytest tests/ir -v
 
-echo
+echo "------------------------------------------------------------"
+echo "Step 4.4: SSA tests"
+echo "------------------------------------------------------------"
+run_cmd "$PY" -m pytest tests/ssa -v
 
 echo "============================================================"
 echo "[Sprint 5] x86-64 Code Generation"
 echo "============================================================"
-mkdir -p build
-run_cmd "$PY" main.py asm --input examples/demo/merge_sort.src --output build/merge_sort.asm
+echo "Assembly is generated ONLY after the IR and SSA steps above."
+run_cmd "$PY" main.py asm --input examples/demo/ir_ssa_demo.src --output build/ir_ssa_demo.asm
 
-if [ -f build/merge_sort.asm ]; then
+if [ -f build/ir_ssa_demo.asm ]; then
     echo "Generated assembly preview:"
-    sed -n '1,120p' build/merge_sort.asm
+    sed -n '1,120p' build/ir_ssa_demo.asm
 fi
 
 run_cmd "$PY" -m pytest tests/codegen -v
@@ -154,6 +131,17 @@ echo "============================================================"
 echo "[Sprint 7] Advanced Features"
 echo "============================================================"
 run_cmd "$PY" -m pytest tests/sprint7 -v
+
+echo "============================================================"
+echo "[Sprint 8] Full Pipeline Integration"
+echo "============================================================"
+if [ -d tests/sprint8 ]; then
+    run_cmd "$PY" -m pytest tests/sprint8 -v
+fi
+
+if [ -f scripts/full_build_demo.sh ]; then
+    echo "Full build demo script exists: scripts/full_build_demo.sh"
+fi
 
 echo "============================================================"
 echo "Defense demo completed."

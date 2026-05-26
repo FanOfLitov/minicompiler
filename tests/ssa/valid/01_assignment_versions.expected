@@ -1,0 +1,6 @@
+ssa function main: int ()
+  entry:
+    x.1 = MOVE 1    # ssa store
+    x.2 = MOVE 2    # ssa store
+    t1_1 = MOVE x.2    # ssa load
+    RETURN t1_1

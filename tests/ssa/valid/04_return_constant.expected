@@ -1,0 +1,3 @@
+ssa function main: int ()
+  entry:
+    RETURN 42
