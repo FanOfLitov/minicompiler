@@ -1,0 +1,64 @@
+#!/usr/bin/env bash
+set -e
+
+PROJECT_ROOT="$(cd "$(dirname "$0")" && pwd)"
+cd "$PROJECT_ROOT"
+
+PY="${PYTHON_CMD:-python3}"
+
+COMMAND="$1"
+INPUT="$2"
+
+if [ -z "$COMMAND" ] || [ -z "$INPUT" ]; then
+    echo "Usage:"
+    echo "  ./mycc lex FILE"
+    echo "  ./mycc parse FILE"
+    echo "  ./mycc semantic FILE"
+    echo "  ./mycc ir FILE"
+    echo "  ./mycc ssa FILE"
+    echo "  ./mycc asm FILE -o OUTPUT"
+    exit 1
+fi
+
+shift 2
+
+case "$COMMAND" in
+    lex)
+        "$PY" main.py lex --input "$INPUT"
+        ;;
+    parse)
+        "$PY" main.py parse --input "$INPUT" --format text
+        ;;
+    semantic|check)
+        "$PY" main.py semantic --input "$INPUT" --symbols
+        ;;
+    ir)
+        "$PY" main.py ir --input "$INPUT"
+        ;;
+    ssa)
+        "$PY" main.py ssa --input "$INPUT"
+        ;;
+    asm)
+        OUTPUT="build/out.asm"
+
+        while [ $# -gt 0 ]; do
+            case "$1" in
+                -o|--output)
+                    OUTPUT="$2"
+                    shift 2
+                    ;;
+                *)
+                    shift
+                    ;;
+            esac
+        done
+
+        mkdir -p build
+        "$PY" main.py asm --input "$INPUT" --output "$OUTPUT"
+        echo "ASM written to $OUTPUT"
+        ;;
+    *)
+        echo "Unknown command: $COMMAND"
+        exit 1
+        ;;
+esac

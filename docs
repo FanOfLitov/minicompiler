@@ -1,0 +1,17 @@
+Для merge sort:
+
+python3 examples/demo/rebuild_merge_sort_real_pipeline.py
+cat build/merge_sort.asm
+
+./mycc lex examples/demo/ir_ssa_demo.src
+./mycc parse examples/demo/ir_ssa_demo.src
+./mycc semantic examples/demo/ir_ssa_demo.src
+./mycc ir examples/demo/ir_ssa_demo.src
+./mycc ssa examples/demo/ir_ssa_demo.src
+./mycc asm examples/demo/ir_ssa_demo.src -o build/ir_ssa_demo.asm
+
+
+Для merge sort:
+
+python3 examples/demo/rebuild_merge_sort_real_pipeline.py
+cat build/merge_sort.asm
